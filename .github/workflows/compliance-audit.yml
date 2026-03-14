@@ -1,0 +1,47 @@
+name: "CIS Compliance Audit"
+
+on:
+  pull_request:
+    paths:
+      - "**/*.tf"
+      - "**/*.tfvars"
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  compliance-audit:
+    name: "☁️ CIS Benchmark Audit"
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: compliance_guardian
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Cloud-Compliance Guardian
+        uses: ./actions
+        with:
+          sec8b_endpoint: ${{ secrets.SEC8B_ENDPOINT }}
+          sec8b_model: ${{ secrets.SEC8B_MODEL || 'cisco-sec-8b' }}
+          sec8b_backend: ${{ secrets.SEC8B_BACKEND || 'ollama' }}
+          terraform_dir: "."
+          severity_threshold: "critical"
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          database_url: "postgresql://postgres:postgres@localhost:5432/compliance_guardian"
+          post_pr_comment: "true"
