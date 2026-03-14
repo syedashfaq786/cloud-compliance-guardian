@@ -25,10 +25,15 @@ from sqlalchemy.orm import declarative_base, sessionmaker, relationship, Session
 
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
-    "postgresql://postgres:postgres@localhost:5432/compliance_guardian",
+    "sqlite:///./compliance_guardian.db",
 )
 
-engine = create_engine(DATABASE_URL, echo=False, pool_pre_ping=True)
+# Use check_same_thread=False for SQLite to work with FastAPI
+connect_args = {}
+if DATABASE_URL.startswith("sqlite"):
+    connect_args = {"check_same_thread": False}
+
+engine = create_engine(DATABASE_URL, echo=False, pool_pre_ping=True, connect_args=connect_args)
 SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
 Base = declarative_base()
 
