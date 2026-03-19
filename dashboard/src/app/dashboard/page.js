@@ -11,6 +11,7 @@ import TrendsView from "@/components/TrendsView";
 import DriftAlertsView from "@/components/DriftAlertsView";
 import CISRulesView from "@/components/CISRulesView";
 import SettingsView from "@/components/SettingsView";
+import ConnectView from "@/components/ConnectView";
 import { Icon } from "@/components/Icons";
 
 const API_BASE = "http://localhost:8000";
@@ -95,6 +96,7 @@ export default function DashboardPage() {
     switch (activeTab) {
       case "dashboard": return <DashboardOverview />;
       case "audits":    return <AuditsView />;
+      case "connect":   return <ConnectView />;
       case "trends":    return <TrendsView />;
       case "drift":     return <DriftAlertsView />;
       case "rules":     return <CISRulesView />;

@@ -5,7 +5,7 @@ Uses SQLAlchemy ORM for models and queries. Auto-creates tables on first run.
 """
 
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Dict, Any
 
 from sqlalchemy import (
@@ -151,29 +151,23 @@ class TrendSnapshot(Base):
         }
 
 
-class DriftAlert(Base):
-    __tablename__ = "drift_alerts"
+class GitHubRepo(Base):
+    __tablename__ = "github_repos"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    alert_type = Column(String(64), nullable=False)  # new_violation, regression, score_drop
-    severity = Column(String(16), nullable=False)
-    title = Column(String(256), nullable=False)
-    description = Column(Text, nullable=False)
-    resource_address = Column(String(256), nullable=True)
-    previous_audit_id = Column(String(64), nullable=True)
-    current_audit_id = Column(String(64), nullable=True)
-    is_acknowledged = Column(Boolean, default=False)
+    name = Column(String(256), nullable=False)
+    url = Column(String(512), nullable=False, unique=True)
+    last_sync = Column(DateTime, nullable=True)
+    is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "id": self.id,
-            "alert_type": self.alert_type,
-            "severity": self.severity,
-            "title": self.title,
-            "description": self.description,
-            "resource_address": self.resource_address,
-            "is_acknowledged": self.is_acknowledged,
+            "name": self.name,
+            "url": self.url,
+            "last_sync": self.last_sync.isoformat() if self.last_sync else None,
+            "is_active": self.is_active,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
 
@@ -255,7 +249,7 @@ def get_findings_by_audit(session: Session, audit_db_id: int) -> List[Finding]:
 
 def get_trend_data(session: Session, days: int = 30) -> List[TrendSnapshot]:
     """Get trend snapshots for the last N days."""
-    cutoff = datetime.now(timezone.utc)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
     return (
         session.query(TrendSnapshot)
         .filter(TrendSnapshot.date >= cutoff)
@@ -330,3 +324,31 @@ def get_compliance_summary(session: Session) -> Dict[str, Any]:
             "low": latest.low_count,
         },
     }
+
+
+def save_github_repo(session: Session, name: str, url: str) -> GitHubRepo:
+    """Save or update a GitHub repository connection."""
+    existing = session.query(GitHubRepo).filter(GitHubRepo.url == url).first()
+    if existing:
+        existing.name = name
+        existing.is_active = True
+        session.commit()
+        return existing
+    
+    repo = GitHubRepo(name=name, url=url)
+    session.add(repo)
+    session.commit()
+    return repo
+
+
+def get_connected_repo(session: Session) -> Optional[GitHubRepo]:
+    """Get the currently active GitHub repository."""
+    return session.query(GitHubRepo).filter(GitHubRepo.is_active == True).first()
+
+
+def update_repo_sync_time(session: Session, repo_id: int):
+    """Update the last sync timestamp for a repository."""
+    repo = session.query(GitHubRepo).get(repo_id)
+    if repo:
+        repo.last_sync = datetime.now(timezone.utc)
+        session.commit()
