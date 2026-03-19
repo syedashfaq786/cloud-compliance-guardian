@@ -31,16 +31,16 @@ export default function TrendChart({ data = null }) {
 
     // Gradient fills
     const criticalGradient = ctx.createLinearGradient(0, 0, 0, 300);
-    criticalGradient.addColorStop(0, "rgba(239, 68, 68, 0.3)");
+    criticalGradient.addColorStop(0, "rgba(239, 68, 68, 0.2)");
     criticalGradient.addColorStop(1, "rgba(239, 68, 68, 0.0)");
 
     const highGradient = ctx.createLinearGradient(0, 0, 0, 300);
-    highGradient.addColorStop(0, "rgba(249, 115, 22, 0.2)");
-    highGradient.addColorStop(1, "rgba(249, 115, 22, 0.0)");
+    highGradient.addColorStop(0, "rgba(255, 122, 0, 0.15)");
+    highGradient.addColorStop(1, "rgba(255, 122, 0, 0.0)");
 
     const mediumGradient = ctx.createLinearGradient(0, 0, 0, 300);
-    mediumGradient.addColorStop(0, "rgba(245, 158, 11, 0.15)");
-    mediumGradient.addColorStop(1, "rgba(245, 158, 11, 0.0)");
+    mediumGradient.addColorStop(0, "rgba(255, 159, 67, 0.12)");
+    mediumGradient.addColorStop(1, "rgba(255, 159, 67, 0.0)");
 
     chartInstance.current = new ChartJS(ctx, {
       type: "line",
@@ -57,21 +57,21 @@ export default function TrendChart({ data = null }) {
             pointRadius: 4,
             pointHoverRadius: 6,
             pointBackgroundColor: "#ef4444",
-            pointBorderColor: "#0a0e1a",
+            pointBorderColor: "#ffffff",
             pointBorderWidth: 2,
             borderWidth: 2,
           },
           {
             label: "High",
             data: chartData.high,
-            borderColor: "#f97316",
+            borderColor: "#ff7a00",
             backgroundColor: highGradient,
             fill: true,
             tension: 0.4,
             pointRadius: 4,
             pointHoverRadius: 6,
-            pointBackgroundColor: "#f97316",
-            pointBorderColor: "#0a0e1a",
+            pointBackgroundColor: "#ff7a00",
+            pointBorderColor: "#ffffff",
             pointBorderWidth: 2,
             borderWidth: 2,
           },
@@ -85,7 +85,7 @@ export default function TrendChart({ data = null }) {
             pointRadius: 4,
             pointHoverRadius: 6,
             pointBackgroundColor: "#f59e0b",
-            pointBorderColor: "#0a0e1a",
+            pointBorderColor: "#ffffff",
             pointBorderWidth: 2,
             borderWidth: 2,
           },
@@ -102,7 +102,7 @@ export default function TrendChart({ data = null }) {
           legend: {
             position: "top",
             labels: {
-              color: "#94a3b8",
+              color: "#6b7280",
               font: { family: "Inter", size: 11, weight: "600" },
               usePointStyle: true,
               pointStyle: "circle",
@@ -123,17 +123,17 @@ export default function TrendChart({ data = null }) {
         },
         scales: {
           x: {
-            grid: { color: "rgba(255, 255, 255, 0.03)" },
+            grid: { color: "rgba(0, 0, 0, 0.04)" },
             ticks: {
-              color: "#64748b",
+              color: "#9ca3af",
               font: { family: "Inter", size: 11 },
             },
           },
           y: {
             beginAtZero: true,
-            grid: { color: "rgba(255, 255, 255, 0.03)" },
+            grid: { color: "rgba(0, 0, 0, 0.04)" },
             ticks: {
-              color: "#64748b",
+              color: "#9ca3af",
               font: { family: "Inter", size: 11 },
               stepSize: 5,
             },

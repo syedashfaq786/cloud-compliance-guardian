@@ -11,9 +11,9 @@ export default function ConnectView() {
   const fileInputRef = useRef(null);
 
   const providers = [
-    { id: "aws", name: "AWS", description: "Amazon Web Services", logo: "/logos/aws.png", icon: "aws" },
-    { id: "azure", name: "Azure", description: "Microsoft Azure", logo: "/logos/azure.png", icon: "azure" },
-    { id: "gcp", name: "GCP", description: "Google Cloud Platform", logo: "/logos/gcp.png", icon: "gcp" },
+    { id: "aws", name: "AWS", description: "Amazon Web Services", logo: "/logos/aws.svg", icon: "aws" },
+    { id: "azure", name: "Azure", description: "Microsoft Azure", logo: "/logos/azure.svg", icon: "azure" },
+    { id: "gcp", name: "GCP", description: "Google Cloud Platform", logo: "/logos/gcp.svg", icon: "gcp" },
   ];
 
   const handleUploadClick = () => {

@@ -46,16 +46,16 @@ export default function ScoreCard({ score = 78.5 }) {
         <svg viewBox="0 0 170 170">
           <defs>
             <linearGradient id="gradientGood" x1="0%" y1="0%" x2="100%" y2="100%">
-              <stop offset="0%" stopColor="#10b981" />
-              <stop offset="100%" stopColor="#22d3ee" />
+              <stop offset="0%" stopColor="#22c55e" />
+              <stop offset="100%" stopColor="#4ade80" />
             </linearGradient>
             <linearGradient id="gradientWarn" x1="0%" y1="0%" x2="100%" y2="100%">
-              <stop offset="0%" stopColor="#f59e0b" />
-              <stop offset="100%" stopColor="#f97316" />
+              <stop offset="0%" stopColor="#ff7a00" />
+              <stop offset="100%" stopColor="#ff9f43" />
             </linearGradient>
             <linearGradient id="gradientBad" x1="0%" y1="0%" x2="100%" y2="100%">
               <stop offset="0%" stopColor="#ef4444" />
-              <stop offset="100%" stopColor="#f97316" />
+              <stop offset="100%" stopColor="#ff7a00" />
             </linearGradient>
           </defs>
           <circle cx="85" cy="85" r={radius} className="score-ring-bg" />

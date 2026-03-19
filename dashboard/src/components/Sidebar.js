@@ -1,7 +1,7 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { Icon } from "./Icons";
+import { Icon, Logo } from "./Icons";
 
 export default function Sidebar({ activeTab = "dashboard", onTabChange }) {
   const router = useRouter();
@@ -16,20 +16,10 @@ export default function Sidebar({ activeTab = "dashboard", onTabChange }) {
     { icon: "gear",      label: "Settings",  key: "settings" },
   ];
 
-  const [theme, setTheme] = useState('dark');
-
   useEffect(() => {
-    const savedTheme = localStorage.getItem('theme') || 'dark';
-    setTheme(savedTheme);
+    const savedTheme = localStorage.getItem('theme') || 'light';
     document.documentElement.setAttribute('data-theme', savedTheme);
   }, []);
-
-  const toggleTheme = () => {
-    const newTheme = theme === 'dark' ? 'light' : 'dark';
-    setTheme(newTheme);
-    document.documentElement.setAttribute('data-theme', newTheme);
-    localStorage.setItem('theme', newTheme);
-  };
 
   const handleLogout = () => {
     router.push("/");
@@ -38,7 +28,7 @@ export default function Sidebar({ activeTab = "dashboard", onTabChange }) {
   return (
     <aside className="sidebar">
       <div className="sidebar-logo">
-        <h1><Icon name="cloud" size={22} style={{ marginRight: 6, verticalAlign: "middle" }} /> Cloud-Compliance Guardian</h1>
+        <h1><Logo size={28} style={{ marginRight: 8, verticalAlign: "middle" }} /> Cloud Compliance Guardian</h1>
         <span>CIS Benchmark Monitor</span>
       </div>
 
@@ -56,10 +46,6 @@ export default function Sidebar({ activeTab = "dashboard", onTabChange }) {
       </nav>
 
       <div className="sidebar-footer">
-        <button className="nav-item" onClick={toggleTheme} style={{ width: '100%', border: 'none', background: 'transparent', marginBottom: 8 }}>
-          <span className="nav-icon"><Icon name={theme === 'dark' ? 'sun' : 'moon'} size={18} /></span>
-          <span>{theme === 'dark' ? 'Light Mode' : 'Dark Mode'}</span>
-        </button>
         <button className="logout-btn" onClick={handleLogout}>
           <Icon name="logout" size={16} />
           <span>Sign Out</span>

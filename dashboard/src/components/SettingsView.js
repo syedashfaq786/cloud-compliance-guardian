@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Icon } from "./Icons";
 
 export default function SettingsView() {
@@ -7,6 +7,18 @@ export default function SettingsView() {
   const [modelName, setModelName] = useState("cisco-sec-8b");
   const [dbUrl, setDbUrl] = useState("sqlite:///./compliance_guardian.db");
   const [saved, setSaved] = useState(false);
+  const [theme, setTheme] = useState("light");
+
+  useEffect(() => {
+    const savedTheme = localStorage.getItem("theme") || "light";
+    setTheme(savedTheme);
+  }, []);
+
+  const handleThemeChange = (newTheme) => {
+    setTheme(newTheme);
+    document.documentElement.setAttribute("data-theme", newTheme);
+    localStorage.setItem("theme", newTheme);
+  };
 
   const handleSave = () => {
     setSaved(true);
@@ -70,8 +82,18 @@ export default function SettingsView() {
             <div className="settings-field">
               <label>Theme</label>
               <div style={{ display: "flex", gap: 8 }}>
-                <button className="period-btn active">Dark</button>
-                <button className="period-btn" disabled>Light (Coming Soon)</button>
+                <button
+                  className={`period-btn ${theme === "light" ? "active" : ""}`}
+                  onClick={() => handleThemeChange("light")}
+                >
+                  <Icon name="sun" size={14} style={{ marginRight: 4 }} /> Light
+                </button>
+                <button
+                  className={`period-btn ${theme === "dark" ? "active" : ""}`}
+                  onClick={() => handleThemeChange("dark")}
+                >
+                  <Icon name="moon" size={14} style={{ marginRight: 4 }} /> Dark
+                </button>
               </div>
             </div>
           </div>

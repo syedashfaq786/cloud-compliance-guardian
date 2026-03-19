@@ -151,6 +151,33 @@ class TrendSnapshot(Base):
         }
 
 
+class DriftAlert(Base):
+    __tablename__ = "drift_alerts"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    alert_type = Column(String(64), nullable=False)
+    severity = Column(String(16), nullable=False)
+    title = Column(String(256), nullable=False)
+    description = Column(Text, default="")
+    resource_address = Column(String(256), nullable=True)
+    previous_audit_id = Column(String(64), nullable=True)
+    current_audit_id = Column(String(64), nullable=True)
+    is_acknowledged = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "alert_type": self.alert_type,
+            "severity": self.severity,
+            "title": self.title,
+            "description": self.description,
+            "resource_address": self.resource_address,
+            "is_acknowledged": self.is_acknowledged,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
 class GitHubRepo(Base):
     __tablename__ = "github_repos"
 

@@ -1,7 +1,7 @@
 import "./globals.css";
 
 export const metadata = {
-  title: "Cloud-Compliance Guardian | Security Dashboard",
+  title: "Cloud Compliance Guardian | Security Dashboard",
   description: "AI-powered Terraform CIS Benchmark compliance monitoring dashboard — powered by Cisco Sec-8B",
   keywords: ["terraform", "CIS", "compliance", "security", "dashboard", "cisco", "sec-8b"],
 };
@@ -15,7 +15,7 @@ export default function RootLayout({ children }) {
             __html: `
               (function() {
                 try {
-                  var theme = localStorage.getItem('theme') || 'dark';
+                  var theme = localStorage.getItem('theme') || 'light';
                   document.documentElement.setAttribute('data-theme', theme);
                 } catch (e) {}
               })();

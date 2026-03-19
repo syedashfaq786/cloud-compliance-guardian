@@ -1,5 +1,53 @@
 "use client";
 
+export function Logo({ size = 32, className = "", style = {} }) {
+  return (
+    <span className={`logo-mark ${className}`} style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", lineHeight: 0, ...style }}>
+      <svg width={size} height={size} viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <linearGradient id="logoGrad1" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor="#ff7a00" />
+            <stop offset="100%" stopColor="#ff9f43" />
+          </linearGradient>
+          <linearGradient id="logoGrad2" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor="#ff9f43" />
+            <stop offset="100%" stopColor="#ffbe76" />
+          </linearGradient>
+        </defs>
+        {/* Shield body */}
+        <path
+          d="M32 4L8 16v16c0 14.4 10.24 27.84 24 32 13.76-4.16 24-17.6 24-32V16L32 4z"
+          fill="url(#logoGrad1)"
+          opacity="0.9"
+        />
+        {/* Cloud shape inside shield */}
+        <path
+          d="M40.5 30.5a5.5 5.5 0 00-5.2-3.8 7.5 7.5 0 00-14.3 3.2 4.8 4.8 0 002 9.1h15.5a4.2 4.2 0 002-7.8 5.3 5.3 0 00-.3-.7h.3z"
+          fill="white"
+          opacity="0.95"
+        />
+        {/* Checkmark over cloud */}
+        <path
+          d="M25 32l4.5 4.5L38 28"
+          stroke="url(#logoGrad1)"
+          strokeWidth="3"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          fill="none"
+        />
+        {/* Subtle inner glow ring */}
+        <path
+          d="M32 8L12 18v14c0 12.4 8.6 23.9 20 27.6 11.4-3.7 20-15.2 20-27.6V18L32 8z"
+          fill="none"
+          stroke="white"
+          strokeWidth="0.8"
+          opacity="0.2"
+        />
+      </svg>
+    </span>
+  );
+}
+
 export function Icon({ name, size = 20, className = "", style = {} }) {
   const icons = {
     // ── Sidebar Nav ──────────────────────────────────────────────
@@ -259,6 +307,16 @@ export function Icon({ name, size = 20, className = "", style = {} }) {
     moon: (
       <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+      </svg>
+    ),
+    calendar: (
+      <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" />
+      </svg>
+    ),
+    clock: (
+      <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" />
       </svg>
     ),
   };

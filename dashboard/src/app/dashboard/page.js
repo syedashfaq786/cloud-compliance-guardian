@@ -18,11 +18,16 @@ const API_BASE = "http://localhost:8000";
 
 function DashboardOverview() {
   const [summary, setSummary] = useState(null);
+  const [recentAudits, setRecentAudits] = useState([]);
 
   useEffect(() => {
     fetch(`${API_BASE}/api/summary`)
       .then((r) => r.json())
       .then((data) => setSummary(data))
+      .catch(() => {});
+    fetch(`${API_BASE}/api/audits`)
+      .then((r) => r.json())
+      .then((data) => setRecentAudits(data.slice(0, 5)))
       .catch(() => {});
   }, []);
 
@@ -30,43 +35,64 @@ function DashboardOverview() {
   const totalAudits = summary?.total_audits ?? 24;
   const totalFindings = summary?.total_findings ?? 8;
   const sev = summary?.severity_breakdown || {};
+  const criticalCount = sev.critical ?? 4;
+  const highCount = sev.high ?? 3;
+  const passRate = totalFindings > 0 ? ((156 - totalFindings) / 156 * 100).toFixed(1) : "100.0";
 
   return (
     <>
-      {/* ── Page Header ──────────────────────────────────────────── */}
-      <div className="page-header">
-        <h2>Security Dashboard</h2>
-        <p>Real-time CIS Benchmark compliance monitoring powered by Cisco Sec-8B</p>
+      {/* ── Welcome Banner ─────────────────────────────────────── */}
+      <div className="welcome-banner animate-fade-in">
+        <div className="welcome-text">
+          <h2>Welcome back</h2>
+          <p>Here's an overview of your cloud infrastructure compliance status.</p>
+        </div>
+        <div className="welcome-date">
+          <Icon name="calendar" size={16} />
+          <span>{new Date().toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}</span>
+        </div>
       </div>
 
       {/* ── Top Stats Row ────────────────────────────────────────── */}
       <div className="dashboard-grid">
-        <div className="glass-card stat-card animate-slide-in stagger-1">
-          <div className="stat-icon"><Icon name="folder" size={28} style={{ color: "var(--accent-blue)" }} /></div>
+        <div className="glass-card stat-card stat-blue animate-slide-in stagger-1">
+          <div className="stat-card-top">
+            <div className="stat-icon"><Icon name="folder" size={22} /></div>
+            <span className="stat-change positive"><Icon name="arrow-up" size={10} /> 12%</span>
+          </div>
           <div className="stat-value">{totalAudits}</div>
           <div className="stat-label">Total Audits</div>
-          <span className="stat-change positive"><Icon name="arrow-up" size={10} /> 12% this week</span>
+          <div className="stat-bar"><div className="stat-bar-fill" style={{ width: "72%" }}></div></div>
         </div>
 
-        <div className="glass-card stat-card animate-slide-in stagger-2">
-          <div className="stat-icon"><Icon name="shield" size={28} style={{ color: "var(--accent-purple)" }} /></div>
+        <div className="glass-card stat-card stat-purple animate-slide-in stagger-2">
+          <div className="stat-card-top">
+            <div className="stat-icon"><Icon name="shield" size={22} /></div>
+            <span className="stat-change positive"><Icon name="arrow-up" size={10} /> 8 new</span>
+          </div>
           <div className="stat-value">156</div>
           <div className="stat-label">Resources Scanned</div>
-          <span className="stat-change positive"><Icon name="arrow-up" size={10} /> 8 new</span>
+          <div className="stat-bar"><div className="stat-bar-fill" style={{ width: "85%" }}></div></div>
         </div>
 
-        <div className="glass-card stat-card animate-slide-in stagger-3">
-          <div className="stat-icon"><Icon name="search" size={28} style={{ color: "var(--accent-amber)" }} /></div>
+        <div className="glass-card stat-card stat-amber animate-slide-in stagger-3">
+          <div className="stat-card-top">
+            <div className="stat-icon"><Icon name="search" size={22} /></div>
+            <span className="stat-change negative"><Icon name="arrow-up" size={10} /> 2 new</span>
+          </div>
           <div className="stat-value">{totalFindings}</div>
           <div className="stat-label">Open Violations</div>
-          <span className="stat-change negative"><Icon name="arrow-up" size={10} /> 2 new</span>
+          <div className="stat-bar"><div className="stat-bar-fill" style={{ width: `${Math.min(totalFindings * 5, 100)}%` }}></div></div>
         </div>
 
-        <div className="glass-card stat-card animate-slide-in stagger-4">
-          <div className="stat-icon"><Icon name="circle-check" size={28} style={{ color: "var(--accent-green)" }} /></div>
+        <div className="glass-card stat-card stat-green animate-slide-in stagger-4">
+          <div className="stat-card-top">
+            <div className="stat-icon"><Icon name="circle-check" size={22} /></div>
+            <span className="stat-change positive">{passRate}%</span>
+          </div>
           <div className="stat-value">{156 - totalFindings}</div>
           <div className="stat-label">Compliant Resources</div>
-          <span className="stat-change positive">94.8% pass rate</span>
+          <div className="stat-bar"><div className="stat-bar-fill" style={{ width: `${passRate}%` }}></div></div>
         </div>
       </div>
 
@@ -74,6 +100,88 @@ function DashboardOverview() {
       <div className="dashboard-row">
         <ScoreCard score={score} />
         <TrendChart />
+      </div>
+
+      {/* ── Severity Summary + Recent Activity ─────────────────── */}
+      <div className="dashboard-row">
+        <div className="glass-card animate-slide-in stagger-2">
+          <div className="card-header">
+            <h3><Icon name="shield" size={18} style={{ marginRight: 8, verticalAlign: "middle", color: "var(--accent-purple)" }} /> Severity Breakdown</h3>
+          </div>
+          <div className="card-body">
+            <div className="severity-bars">
+              <div className="severity-bar-row">
+                <div className="severity-bar-label">
+                  <span className="severity-dot critical"></span>
+                  <span>Critical</span>
+                </div>
+                <div className="severity-bar-track">
+                  <div className="severity-bar-fill critical" style={{ width: `${criticalCount * 10}%` }}></div>
+                </div>
+                <span className="severity-bar-count">{criticalCount}</span>
+              </div>
+              <div className="severity-bar-row">
+                <div className="severity-bar-label">
+                  <span className="severity-dot high"></span>
+                  <span>High</span>
+                </div>
+                <div className="severity-bar-track">
+                  <div className="severity-bar-fill high" style={{ width: `${highCount * 10}%` }}></div>
+                </div>
+                <span className="severity-bar-count">{highCount}</span>
+              </div>
+              <div className="severity-bar-row">
+                <div className="severity-bar-label">
+                  <span className="severity-dot medium"></span>
+                  <span>Medium</span>
+                </div>
+                <div className="severity-bar-track">
+                  <div className="severity-bar-fill medium" style={{ width: `${(sev.medium ?? 1) * 10}%` }}></div>
+                </div>
+                <span className="severity-bar-count">{sev.medium ?? 1}</span>
+              </div>
+              <div className="severity-bar-row">
+                <div className="severity-bar-label">
+                  <span className="severity-dot low"></span>
+                  <span>Low</span>
+                </div>
+                <div className="severity-bar-track">
+                  <div className="severity-bar-fill low" style={{ width: `${(sev.low ?? 0) * 10}%` }}></div>
+                </div>
+                <span className="severity-bar-count">{sev.low ?? 0}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="glass-card animate-slide-in stagger-3">
+          <div className="card-header">
+            <h3><Icon name="clock" size={18} style={{ marginRight: 8, verticalAlign: "middle", color: "var(--accent-cyan)" }} /> Recent Activity</h3>
+          </div>
+          <div className="card-body">
+            <div className="activity-list">
+              {recentAudits.length > 0 ? recentAudits.map((audit, i) => (
+                <div key={audit.audit_id || i} className="activity-item">
+                  <div className={`activity-dot ${audit.compliance_score >= 80 ? 'good' : audit.compliance_score >= 50 ? 'warn' : 'bad'}`}></div>
+                  <div className="activity-info">
+                    <span className="activity-title">Scan #{audit.audit_id?.substring(0, 8) || i + 1}</span>
+                    <span className="activity-meta">{audit.files_scanned} files | Score: {audit.compliance_score?.toFixed(1)}%</span>
+                  </div>
+                  <span className="activity-time">{audit.created_at ? new Date(audit.created_at).toLocaleDateString() : 'N/A'}</span>
+                </div>
+              )) : (
+                <div className="activity-item">
+                  <div className="activity-dot good"></div>
+                  <div className="activity-info">
+                    <span className="activity-title">Infrastructure scanned</span>
+                    <span className="activity-meta">All checks passed</span>
+                  </div>
+                  <span className="activity-time">Just now</span>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* ── Findings Table ───────────────────────────────────────── */}

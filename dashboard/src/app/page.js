@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Icon } from "@/components/Icons";
+import { Icon, Logo } from "@/components/Icons";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -31,11 +31,11 @@ export default function LoginPage() {
       <div className="login-grid-overlay" />
 
       <div className="login-container">
-        {/* Left panel — branding */}
+        {/* Left panel — branding (dark) */}
         <div className="login-branding">
           <div className="branding-content">
-            <div className="branding-icon"><Icon name="cloud" size={48} style={{ color: "var(--accent-cyan)" }} /></div>
-            <h1>Cloud-Compliance<br />Guardian</h1>
+            <div className="branding-icon"><Logo size={56} /></div>
+            <h1>Cloud Compliance<br />Guardian</h1>
             <p className="branding-subtitle">
               AI-Powered CIS Benchmark Compliance
             </p>
@@ -58,21 +58,21 @@ export default function LoginPage() {
 
             <div className="branding-features">
               <div className="feature-item">
-                <span className="feature-icon"><Icon name="shield" size={20} style={{ color: "var(--accent-cyan)" }} /></span>
+                <span className="feature-icon"><Icon name="shield" size={20} style={{ color: "#ff9f43" }} /></span>
                 <div>
                   <strong>Privacy-First</strong>
                   <p>All inference runs on your private infrastructure</p>
                 </div>
               </div>
               <div className="feature-item">
-                <span className="feature-icon"><Icon name="search" size={20} style={{ color: "var(--accent-purple)" }} /></span>
+                <span className="feature-icon"><Icon name="search" size={20} style={{ color: "#8b5cf6" }} /></span>
                 <div>
                   <strong>AI-Powered Analysis</strong>
                   <p>Context-aware — not rigid regex rules</p>
                 </div>
               </div>
               <div className="feature-item">
-                <span className="feature-icon"><Icon name="wrench" size={20} style={{ color: "var(--accent-amber)" }} /></span>
+                <span className="feature-icon"><Icon name="wrench" size={20} style={{ color: "#22c55e" }} /></span>
                 <div>
                   <strong>Auto-Remediation</strong>
                   <p>Copy-paste HCL fix snippets for every finding</p>
@@ -86,7 +86,7 @@ export default function LoginPage() {
           </div>
         </div>
 
-        {/* Right panel — login form */}
+        {/* Right panel — login form (light) */}
         <div className="login-form-panel">
           <div className="login-form-wrapper">
             <div className="login-form-header">
