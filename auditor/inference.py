@@ -93,6 +93,7 @@ class InferenceClient:
         self.backend = backend or os.getenv("SEC8B_BACKEND", self.BACKEND_OLLAMA)
         self.timeout = timeout
         self.max_retries = max_retries
+        self._available = None  # Cache health check result
 
     def _build_analysis_prompt(
         self,
@@ -252,6 +253,13 @@ class InferenceClient:
             )
         return findings
 
+    def _is_model_available(self) -> bool:
+        """Quick check if model endpoint is reachable (cached per session)."""
+        if self._available is not None:
+            return self._available
+        self._available = self.health_check()
+        return self._available
+
     def analyze_resource(
         self,
         resource: TerraformResource,
@@ -260,6 +268,10 @@ class InferenceClient:
         """Analyze a single resource for CIS compliance violations."""
         applicable_rules = get_rules_for_resource_type(resource.resource_type)
         if not applicable_rules:
+            return []
+
+        # Fast-fail if model endpoint is not available
+        if not self._is_model_available():
             return []
 
         prompt = self._build_analysis_prompt(resource, applicable_rules, raw_hcl)

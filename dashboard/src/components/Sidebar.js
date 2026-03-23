@@ -9,10 +9,11 @@ export default function Sidebar({ activeTab = "dashboard", onTabChange }) {
   const navItems = [
     { icon: "dashboard", label: "Dashboard", key: "dashboard" },
     { icon: "cloud-plus", label: "Connect",    key: "connect" },
+    { icon: "radar",     label: "Monitoring", key: "monitoring" },
     { icon: "shield",    label: "Audits",    key: "audits" },
     { icon: "chart-line",label: "Trends",    key: "trends" },
     { icon: "bell",      label: "Drift Alerts", key: "drift" },
-    { icon: "clipboard", label: "CIS Rules", key: "rules" },
+    { icon: "clipboard", label: "Compliance Rules", key: "rules" },
     { icon: "gear",      label: "Settings",  key: "settings" },
   ];
 
@@ -29,7 +30,7 @@ export default function Sidebar({ activeTab = "dashboard", onTabChange }) {
     <aside className="sidebar">
       <div className="sidebar-logo">
         <h1><Logo size={28} style={{ marginRight: 8, verticalAlign: "middle" }} /> Cloud Compliance Guardian</h1>
-        <span>CIS Benchmark Monitor</span>
+        <span>CIS & NIST Compliance Monitor</span>
       </div>
 
       <nav className="sidebar-nav">
