@@ -610,15 +610,20 @@ def download_aws_report(format: str = Query("pdf", pattern="^(pdf|csv|json)$")):
         output = io.StringIO()
         writer = csv.writer(output)
         writer.writerow([
-            "Status", "Severity", "Rule ID", "Rule Title", "Resource",
-            "Resource Type", "Cloud Provider", "Description", "Recommendation"
+            "Status", "Severity", "Rule ID", "Title", "Resource",
+            "Resource Type", "Cloud Provider", "Description", "Reasoning",
+            "Expected", "Actual", "Recommendation", "Remediation"
         ])
         for f in findings_list:
             writer.writerow([
-                f.get("status", ""), f.get("severity", ""), f.get("rule_id", ""),
-                f.get("rule_title", ""), f.get("resource", f.get("resource_name", "")),
+                f.get("status", ""), f.get("severity", ""),
+                f.get("cis_rule_id", f.get("rule_id", "")),
+                f.get("title", f.get("rule_title", "")),
+                f.get("resource_name", f.get("resource", "")),
                 f.get("resource_type", ""), "AWS",
-                f.get("description", ""), f.get("recommendation", ""),
+                f.get("description", ""), f.get("reasoning", ""),
+                f.get("expected", ""), f.get("actual", ""),
+                f.get("recommendation", ""), f.get("remediation_step", ""),
             ])
         content = output.getvalue()
         return StreamingResponse(

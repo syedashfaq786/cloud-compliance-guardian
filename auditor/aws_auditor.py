@@ -32,11 +32,16 @@ def audit_s3_bucket(resource: Dict[str, Any]) -> List[Dict[str, Any]]:
             "cis_rule_id": "CIS 2.1.1",
             "title": "S3 Bucket Server-Side Encryption Not Enabled",
             "description": f"Bucket '{name}' does not have server-side encryption enabled. Data at rest is unprotected.",
-            "remediation_step": "Enable SSE-S3 or SSE-KMS encryption: aws s3api put-bucket-encryption --bucket BUCKET --server-side-encryption-configuration '{\"Rules\":[{\"ApplyServerSideEncryptionByDefault\":{\"SSEAlgorithm\":\"aws:kms\"}}]}'",
+            "reasoning": f"Checked ServerSideEncryptionConfiguration for bucket '{name}'. No encryption rule was found, meaning objects stored in this bucket are not encrypted at rest. This violates CIS AWS Foundations Benchmark 2.1.1.",
+            "expected": "Server-side encryption enabled with SSE-S3 (AES-256) or SSE-KMS algorithm",
+            "actual": f"Encryption: {enc.get('algorithm', 'none')} (disabled)",
+            "recommendation": "Enable default server-side encryption using SSE-S3 or SSE-KMS. SSE-KMS provides additional audit trail via CloudTrail and supports key rotation.",
+            "remediation_step": "aws s3api put-bucket-encryption --bucket BUCKET --server-side-encryption-configuration '{\"Rules\":[{\"ApplyServerSideEncryptionByDefault\":{\"SSEAlgorithm\":\"aws:kms\"}}]}'",
         })
 
     # CIS 2.1.2 — S3 bucket versioning
-    if config.get("versioning") != "Enabled":
+    versioning_status = config.get("versioning", "Disabled")
+    if versioning_status != "Enabled":
         findings.append({
             "resource_id": resource.get("resource_id", ""),
             "resource_name": name,
@@ -46,13 +51,24 @@ def audit_s3_bucket(resource: Dict[str, Any]) -> List[Dict[str, Any]]:
             "cis_rule_id": "CIS 2.1.2",
             "title": "S3 Bucket Versioning Not Enabled",
             "description": f"Bucket '{name}' does not have versioning enabled. Data cannot be recovered if accidentally deleted.",
-            "remediation_step": "Enable versioning: aws s3api put-bucket-versioning --bucket BUCKET --versioning-configuration Status=Enabled",
+            "reasoning": f"Checked GetBucketVersioning for bucket '{name}'. Versioning status is '{versioning_status}'. Without versioning, deleted or overwritten objects cannot be recovered, increasing risk of data loss.",
+            "expected": "Versioning status: Enabled",
+            "actual": f"Versioning status: {versioning_status}",
+            "recommendation": "Enable versioning to protect against accidental deletion and overwrites. Consider adding lifecycle rules to manage version storage costs.",
+            "remediation_step": "aws s3api put-bucket-versioning --bucket BUCKET --versioning-configuration Status=Enabled",
         })
 
     # CIS 2.1.5 — S3 public access block
     pub = config.get("public_access_block", {})
-    if not all([pub.get("block_public_acls"), pub.get("block_public_policy"),
-                pub.get("ignore_public_acls"), pub.get("restrict_public_buckets")]):
+    all_blocked = all([pub.get("block_public_acls"), pub.get("block_public_policy"),
+                pub.get("ignore_public_acls"), pub.get("restrict_public_buckets")])
+    if not all_blocked:
+        missing = [k for k, v in [
+            ("BlockPublicAcls", pub.get("block_public_acls")),
+            ("BlockPublicPolicy", pub.get("block_public_policy")),
+            ("IgnorePublicAcls", pub.get("ignore_public_acls")),
+            ("RestrictPublicBuckets", pub.get("restrict_public_buckets")),
+        ] if not v]
         findings.append({
             "resource_id": resource.get("resource_id", ""),
             "resource_name": name,
@@ -62,7 +78,11 @@ def audit_s3_bucket(resource: Dict[str, Any]) -> List[Dict[str, Any]]:
             "cis_rule_id": "CIS 2.1.5",
             "title": "S3 Public Access Block Not Fully Configured",
             "description": f"Bucket '{name}' does not have all public access block settings enabled. This could expose data publicly.",
-            "remediation_step": "Enable all public access block settings: aws s3api put-public-access-block --bucket BUCKET --public-access-block-configuration BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true",
+            "reasoning": f"Checked PublicAccessBlockConfiguration for bucket '{name}'. The following settings are not enabled: {', '.join(missing)}. Without full public access blocking, the bucket or its objects could be made publicly accessible through ACLs or bucket policies.",
+            "expected": "All four public access block settings enabled (BlockPublicAcls, BlockPublicPolicy, IgnorePublicAcls, RestrictPublicBuckets)",
+            "actual": f"Missing: {', '.join(missing)}",
+            "recommendation": "Enable all four public access block settings. This is the most effective way to prevent accidental public exposure of S3 data.",
+            "remediation_step": "aws s3api put-public-access-block --bucket BUCKET --public-access-block-configuration BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true",
         })
 
     # CIS 3.6 — S3 access logging
@@ -76,7 +96,11 @@ def audit_s3_bucket(resource: Dict[str, Any]) -> List[Dict[str, Any]]:
             "cis_rule_id": "CIS 3.6",
             "title": "S3 Bucket Access Logging Not Enabled",
             "description": f"Bucket '{name}' does not have server access logging enabled. Cannot track who accessed what.",
-            "remediation_step": "Enable access logging: aws s3api put-bucket-logging --bucket BUCKET --bucket-logging-status '{\"LoggingEnabled\":{\"TargetBucket\":\"LOG_BUCKET\",\"TargetPrefix\":\"logs/\"}}'",
+            "reasoning": f"Checked GetBucketLogging for bucket '{name}'. No LoggingEnabled configuration found. Without access logging, there is no audit trail of who accessed or modified objects in the bucket.",
+            "expected": "Server access logging enabled with target bucket configured",
+            "actual": "Logging: Disabled",
+            "recommendation": "Enable server access logging to a dedicated logging bucket. This provides an audit trail for security investigations and compliance.",
+            "remediation_step": "aws s3api put-bucket-logging --bucket BUCKET --bucket-logging-status '{\"LoggingEnabled\":{\"TargetBucket\":\"LOG_BUCKET\",\"TargetPrefix\":\"logs/\"}}'",
         })
 
     # If all checks pass
@@ -89,7 +113,7 @@ def audit_s3_bucket(resource: Dict[str, Any]) -> List[Dict[str, Any]]:
             "severity": "NONE",
             "cis_rule_id": "ALL",
             "title": "S3 Bucket Fully Compliant",
-            "description": f"Bucket '{name}' passes all CIS Benchmark checks.",
+            "description": f"Bucket '{name}' passes all CIS Benchmark checks (encryption, versioning, public access block, logging).",
             "remediation_step": "No action needed.",
         })
 
@@ -130,6 +154,10 @@ def audit_security_group(resource: Dict[str, Any]) -> List[Dict[str, Any]]:
                     "cis_rule_id": "CIS 5.1",
                     "title": "Security Group Allows All Traffic from Internet",
                     "description": f"Security group '{name}' allows ALL inbound traffic from 0.0.0.0/0. This exposes all ports to the internet.",
+                    "reasoning": f"Analyzed ingress rules for security group '{name}'. Found a rule with protocol=-1 (all traffic) and CIDR 0.0.0.0/0 (all IPs). This effectively makes every port on associated instances accessible from anywhere on the internet.",
+                    "expected": "Ingress rules restricted to specific ports and source IP ranges",
+                    "actual": f"Protocol: ALL, Ports: 0-65535, Source: {cidr}",
+                    "recommendation": "Remove the unrestricted rule. Create specific rules for only the ports needed (e.g., 443 for HTTPS) and restrict source IPs to known ranges.",
                     "remediation_step": "Restrict ingress rules to specific ports and source IPs. Remove the 0.0.0.0/0 rule.",
                 })
                 continue
@@ -146,6 +174,10 @@ def audit_security_group(resource: Dict[str, Any]) -> List[Dict[str, Any]]:
                         "cis_rule_id": cis_id,
                         "title": f"{service} (Port {port}) Open to Internet",
                         "description": f"Security group '{name}' allows {service} access (port {port}) from 0.0.0.0/0. This is a critical security risk.",
+                        "reasoning": f"Found ingress rule in security group '{name}' that allows traffic on port {port} ({service}) from CIDR {cidr}. This exposes the {service} service to the entire internet, making it vulnerable to brute force attacks and exploitation.",
+                        "expected": f"Port {port} ({service}) restricted to specific trusted IP ranges or accessed via VPN/bastion",
+                        "actual": f"Port {port} ({service}) open to {cidr}",
+                        "recommendation": f"Restrict {service} access to specific trusted IPs. Use a VPN or bastion host for administrative access. Consider using AWS Systems Manager Session Manager as a secure alternative to direct SSH/RDP.",
                         "remediation_step": f"Restrict port {port} to specific trusted IPs or use a VPN/bastion host.",
                     })
 
@@ -158,7 +190,7 @@ def audit_security_group(resource: Dict[str, Any]) -> List[Dict[str, Any]]:
             "severity": "NONE",
             "cis_rule_id": "ALL",
             "title": "Security Group Compliant",
-            "description": f"Security group '{name}' passes all CIS Benchmark checks.",
+            "description": f"Security group '{name}' passes all CIS Benchmark checks. No unrestricted ingress rules found.",
             "remediation_step": "No action needed.",
         })
 
@@ -182,6 +214,10 @@ def audit_iam_policy(resource: Dict[str, Any]) -> List[Dict[str, Any]]:
             "cis_rule_id": "CIS 1.16",
             "title": "IAM Policy Grants Full Admin Access",
             "description": f"Policy '{name}' grants Action:* on Resource:* — full administrator access. This violates least-privilege principles.",
+            "reasoning": f"Analyzed policy document for '{name}'. Found a statement with Effect:Allow, Action:*, Resource:*. This grants unrestricted access to all AWS services and resources, equivalent to root access.",
+            "expected": "Policies should follow least-privilege — grant only specific actions on specific resources",
+            "actual": "Effect: Allow, Action: *, Resource: * (full administrator access)",
+            "recommendation": "Replace wildcard permissions with specific service actions. Use AWS managed policies like PowerUserAccess or create custom policies scoped to required services only.",
             "remediation_step": "Replace wildcard permissions with specific service actions. Use AWS managed policies like PowerUserAccess instead of custom admin policies.",
         })
 
@@ -203,6 +239,10 @@ def audit_iam_policy(resource: Dict[str, Any]) -> List[Dict[str, Any]]:
                         "cis_rule_id": "CIS 1.22",
                         "title": f"IAM Policy Grants All Actions for {service}",
                         "description": f"Policy '{name}' grants all actions ({action}) for the {service} service. Use specific actions instead.",
+                        "reasoning": f"Found statement in policy '{name}' with Action:{action}. This grants every possible API action for the {service} service, which is overly permissive and violates least-privilege.",
+                        "expected": f"Specific {service} actions listed (e.g., {service}:GetObject, {service}:PutObject)",
+                        "actual": f"Action: {action} (all actions for {service})",
+                        "recommendation": f"Identify the specific {service} API actions needed and replace '{action}' with only those actions. Review AWS documentation for the minimum permissions required.",
                         "remediation_step": f"Replace '{action}' with specific actions needed (e.g., {service}:GetObject, {service}:PutObject).",
                     })
 
@@ -215,7 +255,7 @@ def audit_iam_policy(resource: Dict[str, Any]) -> List[Dict[str, Any]]:
             "severity": "NONE",
             "cis_rule_id": "ALL",
             "title": "IAM Policy Compliant",
-            "description": f"Policy '{name}' follows least-privilege principles.",
+            "description": f"Policy '{name}' follows least-privilege principles. No wildcard or overly broad permissions found.",
             "remediation_step": "No action needed.",
         })
 
@@ -239,12 +279,17 @@ def audit_iam_user(resource: Dict[str, Any]) -> List[Dict[str, Any]]:
             "cis_rule_id": "CIS 1.10",
             "title": "MFA Not Enabled for IAM User",
             "description": f"User '{name}' does not have Multi-Factor Authentication enabled. Account is vulnerable to credential compromise.",
+            "reasoning": f"Checked MFA devices for user '{name}' via ListMFADevices. No MFA device is associated with this user. Without MFA, a compromised password alone is sufficient to access the AWS account.",
+            "expected": "At least one MFA device (virtual or hardware) assigned to the user",
+            "actual": "MFA devices: 0 (no MFA configured)",
+            "recommendation": "Enable MFA immediately. Use a virtual MFA app (Google Authenticator, Authy) or a hardware key (YubiKey). For console users, MFA should be mandatory.",
             "remediation_step": "Enable MFA: IAM Console > Users > Security Credentials > Assign MFA Device. Use a virtual MFA app like Google Authenticator.",
         })
 
     # CIS 1.14 — Access key rotation (90 days)
     for key in config.get("access_keys", []):
         if key.get("status") == "Active" and key.get("is_old"):
+            age = key.get('age_days', '?')
             findings.append({
                 "resource_id": resource.get("resource_id", ""),
                 "resource_name": name,
@@ -252,8 +297,12 @@ def audit_iam_user(resource: Dict[str, Any]) -> List[Dict[str, Any]]:
                 "status": "FAIL",
                 "severity": "HIGH",
                 "cis_rule_id": "CIS 1.14",
-                "title": f"Access Key Not Rotated ({key.get('age_days', '?')} days old)",
-                "description": f"User '{name}' has an access key that is {key.get('age_days', '?')} days old (>90 days). Old keys increase risk of compromise.",
+                "title": f"Access Key Not Rotated ({age} days old)",
+                "description": f"User '{name}' has an access key that is {age} days old (>90 days). Old keys increase risk of compromise.",
+                "reasoning": f"Checked access key metadata for user '{name}'. Found an active key that was created {age} days ago, exceeding the 90-day rotation threshold. Long-lived credentials have a higher chance of being leaked or compromised.",
+                "expected": "Access keys rotated within 90 days",
+                "actual": f"Access key age: {age} days (threshold: 90 days)",
+                "recommendation": "Rotate the access key immediately. Create a new key, update all applications using the old key, then deactivate and delete the old key. Consider using IAM roles instead of long-lived keys.",
                 "remediation_step": "Rotate the access key: Create new key > Update applications > Deactivate old key > Delete old key.",
             })
 
@@ -266,7 +315,7 @@ def audit_iam_user(resource: Dict[str, Any]) -> List[Dict[str, Any]]:
             "severity": "NONE",
             "cis_rule_id": "ALL",
             "title": "IAM User Compliant",
-            "description": f"User '{name}' has MFA enabled and keys are current.",
+            "description": f"User '{name}' has MFA enabled and access keys are current (< 90 days old).",
             "remediation_step": "No action needed.",
         })
 
@@ -326,6 +375,9 @@ def audit_live_resources(scan_data: Dict[str, Any]) -> Dict[str, Any]:
         "findings": [],
         "events_analysis": [],
         "health_score": 100.0,
+        "total_checks": 0,
+        "passed": 0,
+        "failed": 0,
         "summary": {
             "total_resources": 0,
             "passing": 0,
@@ -371,6 +423,10 @@ def audit_live_resources(scan_data: Dict[str, Any]) -> Dict[str, Any]:
             sev = f["severity"].lower()
             if sev in results["summary"]:
                 results["summary"][sev] += 1
+
+    results["total_checks"] = len(results["findings"])
+    results["passed"] = results["summary"]["passing"]
+    results["failed"] = results["summary"]["failing"]
 
     # Calculate health score
     total = results["summary"]["total_resources"]

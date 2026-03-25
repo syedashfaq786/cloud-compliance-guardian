@@ -644,26 +644,31 @@ def generate_aws_pdf_report(scan_cache: Dict[str, Any]) -> bytes:
         story.append(sev_table)
 
     # ═════════════════════════════════════════════════════════════════════
-    # FAILED FINDINGS
+    # FAILED FINDINGS (DETAILED — matches Terraform report format)
     # ═════════════════════════════════════════════════════════════════════
     if failed:
         story.append(Spacer(1, 10))
         story.append(HRFlowable(width="100%", thickness=1, color=BRAND_ORANGE, spaceAfter=4))
         story.append(Paragraph(f"2. Failed Checks ({len(failed)})", styles["SectionHeader"]))
 
-        for f in failed:
+        for i, f in enumerate(failed, 1):
             sev = f.get("severity", "MEDIUM").upper()
             sev_color = SEVERITY_COLORS.get(sev, MEDIUM_AMBER)
 
             elems = []
+
+            # Finding header
+            rule_id = f.get("cis_rule_id", f.get("rule_id", "N/A"))
+            title = f.get("title", f.get("rule_title", "Unknown"))
             header = (
                 f'<font color="{sev_color.hexval()}"><b>[{sev}]</b></font> '
-                f'<b>{f.get("rule_id", "")} — {f.get("rule_title", "")}</b>'
+                f'<b>{rule_id} — {title}</b>'
             )
             elems.append(Paragraph(header, styles["BodyText2"]))
             elems.append(Spacer(1, 4))
 
-            resource_name = f.get("resource", f.get("resource_name", "N/A"))
+            # Details table
+            resource_name = f.get("resource_name", f.get("resource", "N/A"))
             detail_rows = [
                 ["Resource", str(resource_name)],
                 ["Type", f.get("resource_type", "N/A")],
@@ -680,20 +685,60 @@ def generate_aws_pdf_report(scan_cache: Dict[str, Any]) -> bytes:
             elems.append(dt)
             elems.append(Spacer(1, 4))
 
+            # Description
             desc = f.get("description", "")
             if desc:
                 elems.append(Paragraph(f"<b>Description:</b> {desc}", styles["BodyText2"]))
                 elems.append(Spacer(1, 2))
 
+            # Reasoning / Analysis
+            reasoning = f.get("reasoning", "")
+            if reasoning:
+                elems.append(Paragraph(f"<b>Analysis:</b> {reasoning}", styles["BodyText2"]))
+                elems.append(Spacer(1, 2))
+
+            # Expected vs Actual
+            expected = f.get("expected", "")
+            actual = f.get("actual", "")
+            if expected or actual:
+                ea_rows = []
+                if expected:
+                    ea_rows.append([
+                        Paragraph('<font color="#22c55e"><b>Expected</b></font>', styles["BodyText2"]),
+                        Paragraph(str(expected), styles["CodeBlock"]),
+                    ])
+                if actual:
+                    ea_rows.append([
+                        Paragraph('<font color="#ef4444"><b>Actual</b></font>', styles["BodyText2"]),
+                        Paragraph(str(actual), styles["CodeBlock"]),
+                    ])
+                ea_table = Table(ea_rows, colWidths=[70, 460])
+                ea_table.setStyle(TableStyle([
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                    ("TOPPADDING", (0, 0), (-1, -1), 4),
+                ]))
+                elems.append(ea_table)
+
+            # Recommendation
             rec = f.get("recommendation", "")
             if rec:
                 elems.append(Paragraph(
                     f'<font color="{BRAND_ORANGE.hexval()}"><b>Recommendation:</b></font> {rec}',
                     styles["BodyText2"]
                 ))
+                elems.append(Spacer(1, 2))
+
+            # Remediation Command
+            remediation = f.get("remediation_step", "")
+            if remediation:
+                elems.append(Paragraph("<b>Remediation:</b>", styles["SmallMuted"]))
+                safe_cmd = remediation.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                elems.append(Paragraph(safe_cmd, styles["CodeBlock"]))
 
             elems.append(Spacer(1, 6))
 
+            # Wrap in bordered box
             box = Table([[elems]], colWidths=[530])
             box.setStyle(TableStyle([
                 ("BOX", (0, 0), (-1, -1), 0.5, BORDER_GRAY),
