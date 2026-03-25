@@ -1,0 +1,41 @@
+version: "3.8"
+
+services:
+  # ─── Backend API (FastAPI) ────────────────────────────────────────────
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: ccg-backend
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=sqlite:///compliance_guardian.db
+      - SEC8B_ENDPOINT=${SEC8B_ENDPOINT:-http://host.docker.internal:11434}
+      - SEC8B_MODEL=${SEC8B_MODEL:-cisco-sec-8b}
+      - SEC8B_BACKEND=${SEC8B_BACKEND:-ollama}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
+      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-us-east-1}
+    volumes:
+      - backend-data:/app/compliance_guardian.db
+      - repos-data:/app/auditor/repos
+    restart: unless-stopped
+
+  # ─── Frontend Dashboard (Next.js) ────────────────────────────────────
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile.dashboard
+    container_name: ccg-dashboard
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  backend-data:
+  repos-data:

@@ -22,6 +22,8 @@ export default function AuditsView() {
   const [copiedId, setCopiedId] = useState(null);
   const [filterStatus, setFilterStatus] = useState("ALL"); // ALL, FAIL, PASS
   const [downloading, setDownloading] = useState(false);
+  const [scannedFiles, setScannedFiles] = useState([]);
+  const [showFiles, setShowFiles] = useState(false);
 
   useEffect(() => {
     fetch(`${API_BASE}/api/audits?limit=50`)
@@ -34,11 +36,13 @@ export default function AuditsView() {
     setSelectedAudit(audit);
     setExpandedFinding(null);
     setFilterStatus("ALL");
+    setShowFiles(false);
     try {
       const res = await fetch(`${API_BASE}/api/audits/${audit.audit_id}`);
       const data = await res.json();
       setFindings(data.findings || []);
-    } catch { setFindings([]); }
+      setScannedFiles(data.scanned_files || []);
+    } catch { setFindings([]); setScannedFiles([]); }
   };
 
   const handleCopy = (code, id) => {
@@ -172,9 +176,12 @@ export default function AuditsView() {
 
                 {/* Stat Pills */}
                 <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                  <div className="audit-pill">
+                  <div className="audit-pill" onClick={(e) => { e.stopPropagation(); setShowFiles(!showFiles); }}
+                    style={{ cursor: "pointer", border: showFiles ? "1px solid var(--accent-primary)" : "1px solid transparent", transition: "all 0.2s" }}
+                    title="Click to view scanned files">
                     <Icon name="folder" size={14} />
                     <span><strong>{selectedAudit.files_scanned}</strong> Files</span>
+                    <Icon name={showFiles ? "arrow-up" : "arrow-down"} size={10} style={{ marginLeft: 2, color: "var(--text-muted)" }} />
                   </div>
                   <div className="audit-pill">
                     <Icon name="shield" size={14} />
@@ -217,6 +224,72 @@ export default function AuditsView() {
                     </div>
                   ) : null;
                 })}
+              </div>
+            )}
+
+            {/* Scanned Files Panel */}
+            {showFiles && scannedFiles.length > 0 && (
+              <div className="animate-fade-in" style={{ marginTop: 20 }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+                  <p style={{ fontSize: 13, fontWeight: 700, color: "var(--text-secondary)", display: "flex", alignItems: "center", gap: 6 }}>
+                    <Icon name="folder" size={14} /> Scanned Files ({scannedFiles.length})
+                  </p>
+                  <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                    <span style={{ color: "var(--accent-green)" }}>{scannedFiles.filter(f => f.status === "clean").length} clean</span>
+                    {" · "}
+                    <span style={{ color: "var(--accent-red)" }}>{scannedFiles.filter(f => f.status === "issues").length} with issues</span>
+                  </span>
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {scannedFiles.map((file, idx) => {
+                    const hasIssues = file.status === "issues";
+                    return (
+                      <div key={idx} style={{
+                        display: "flex", alignItems: "center", gap: 12,
+                        padding: "10px 14px", borderRadius: 10,
+                        background: hasIssues ? "rgba(239,68,68,0.04)" : "rgba(34,197,94,0.04)",
+                        border: `1px solid ${hasIssues ? "rgba(239,68,68,0.12)" : "rgba(34,197,94,0.12)"}`,
+                        transition: "all 0.2s",
+                      }}>
+                        <div style={{
+                          width: 32, height: 32, borderRadius: 8,
+                          background: hasIssues ? "rgba(239,68,68,0.1)" : "rgba(34,197,94,0.1)",
+                          display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+                        }}>
+                          <Icon name={hasIssues ? "triangle-alert" : "circle-check"} size={14}
+                            style={{ color: hasIssues ? "var(--accent-red)" : "var(--accent-green)" }} />
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <p style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)", margin: 0 }}>
+                            {file.file}
+                          </p>
+                          {file.resources.length > 0 && (
+                            <p style={{ fontSize: 11, color: "var(--text-muted)", margin: "2px 0 0" }}>
+                              {file.resources.join(", ")}
+                            </p>
+                          )}
+                        </div>
+                        <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+                          {file.pass_count > 0 && (
+                            <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 99, background: "rgba(34,197,94,0.1)", color: "var(--accent-green)" }}>
+                              {file.pass_count} pass
+                            </span>
+                          )}
+                          {file.fail_count > 0 && (
+                            <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 99, background: "rgba(239,68,68,0.1)", color: "var(--accent-red)" }}>
+                              {file.fail_count} fail
+                            </span>
+                          )}
+                          {file.pass_count === 0 && file.fail_count === 0 && (
+                            <span style={{ fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 99, background: "rgba(0,0,0,0.04)", color: "var(--text-muted)" }}>
+                              no checks
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             )}
           </div>

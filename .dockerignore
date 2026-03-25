@@ -1,0 +1,11 @@
+node_modules
+.next
+__pycache__
+*.pyc
+.env
+.git
+.claude
+auditor/repos
+compliance_guardian.db
+venv
+.venv

@@ -121,7 +121,7 @@ def list_audits(limit: int = Query(20, ge=1, le=100)):
 
 @app.get("/api/audits/{audit_id}")
 def get_audit(audit_id: str):
-    """Get a specific audit with its findings."""
+    """Get a specific audit with its findings and scanned file list."""
     session = get_session()
     try:
         audit = get_audit_by_id(session, audit_id)
@@ -129,8 +129,50 @@ def get_audit(audit_id: str):
             raise HTTPException(status_code=404, detail="Audit not found")
 
         findings = get_findings_by_audit(session, audit.id)
+        findings_data = [f.to_dict() for f in findings]
         result = audit.to_dict()
-        result["findings"] = [f.to_dict() for f in findings]
+        result["findings"] = findings_data
+
+        # Build scanned files list with status from findings
+        files_with_findings = {}
+        for f in findings_data:
+            fp = f.get("file_path", "")
+            if not fp:
+                continue
+            if fp not in files_with_findings:
+                files_with_findings[fp] = {"file": fp, "pass": 0, "fail": 0, "resources": set()}
+            files_with_findings[fp]["resources"].add(f.get("resource_address", ""))
+            if f.get("status") == "FAIL":
+                files_with_findings[fp]["fail"] += 1
+            else:
+                files_with_findings[fp]["pass"] += 1
+
+        # Try to also discover files with no findings by scanning directory
+        directory = audit.directory
+        try:
+            from pathlib import Path
+            dir_path = Path(directory)
+            if dir_path.exists() and dir_path.is_dir():
+                for tf_file in sorted(dir_path.rglob("*.tf")):
+                    rel = str(tf_file.relative_to(dir_path))
+                    if rel not in files_with_findings:
+                        files_with_findings[rel] = {"file": rel, "pass": 0, "fail": 0, "resources": set()}
+        except Exception:
+            pass
+
+        # Convert sets to lists for JSON serialization
+        scanned_files = []
+        for fp, info in sorted(files_with_findings.items()):
+            status = "clean" if info["fail"] == 0 else "issues"
+            scanned_files.append({
+                "file": fp,
+                "pass_count": info["pass"],
+                "fail_count": info["fail"],
+                "resources": list(info["resources"]),
+                "status": status,
+            })
+
+        result["scanned_files"] = scanned_files
         return result
     finally:
         session.close()
