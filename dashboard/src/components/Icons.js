@@ -125,41 +125,22 @@ export function Icon({ name, size = 20, className = "", style = {} }) {
       </svg>
     ),
     aws: (
-      <svg width={size} height={size} viewBox="0 0 256 153">
-        <path d="M72.4 100.6c-29 21.5-71.1 33-107.3 33C-54 133.6-71.8 128-86 118.8c-3-2.1-.3-5 3.3-3.4 18.4 10.7 41 17 64.5 17 15.8 0 33.2-3.3 49.2-10 2.4-1 4.4 1.6 2 3.2h-.6z" fill="#F90" transform="translate(88 10)"/>
-        <path d="M80.8 90.6c-4-5.2-26.8-2.5-37-1.3-3.1.4-3.6-2.3-.8-4.3 18.2-12.8 48-9.1 51.5-4.8 3.5 4.3-.9 34.4-18 48.8-2.6 2.2-5.1 1-3.9-1.9 3.8-9.5 12.3-30.8 8.2-36.5z" fill="#F90" transform="translate(88 10)"/>
-        <path d="M44.6 18.1V5.6c0-1.9 1.4-3.2 3.2-3.2h56.2c1.8 0 3.2 1.4 3.2 3.2v10.7c0 1.8-1.6 4.2-4.3 7.9l-29.1 41.6c10.8-.3 22.2 1.3 32 6.8 2.2 1.2 2.8 3 3 4.8v13.4c0 1.8-2 3.9-4.1 2.8-17.1-9-39.8-9.9-58.7.1-1.9 1-4.1-.1-4.1-1.9V78.7c0-2 0-5.5 2.1-8.5l33.7-48.3h-29.3c-1.8 0-3.2-1.4-3.2-3.2l-.6-.6z" fill="#252F3E" transform="translate(88 10)"/>
-        <path d="M-27.6 93.3h-17.1c-1.6-.1-2.9-1.4-3-2.9V5.8c0-1.7 1.5-3.1 3.3-3.1h15.9c1.6.1 3 1.4 3.1 3V14h.3C-21 4.4-14.4.3-5.8.3 2.9.3 8.2 4.4 12.5 14c4.2-9.6 13.7-13.7 22-13.7 6.3 0 13.2 2.6 17.4 8.4 4.8 6.5 3.8 15.8 3.8 24.1l-.1 57.5c0 1.7-1.5 3.1-3.3 3.1H35.2c-1.7-.1-3.1-1.5-3.1-3.1V40.5c0-3.2.3-11.3-.4-14.4-1.1-5.2-4.3-6.6-8.5-6.6-3.5 0-7.1 2.3-8.6 6-1.5 3.7-1.3 9.8-1.3 14.9v50c0 1.7-1.5 3.1-3.3 3.1h-17.1c-1.7-.1-3.1-1.5-3.1-3.1l-.1-49.9c0-8.5 1.4-21-1-25-1.4-5.2-4.1-6.6-8.2-6.6-3.6 0-7.4 2.4-9 6.2-1.5 3.8-1.3 9.8-1.3 15l.2 50.2c0 1.7-1.5 3.1-3.3 3.1l.3.1z" fill="#252F3E" transform="translate(88 10)"/>
+      <svg width={size} height={size} viewBox="0 0 64 64">
+        <path fill="#252F3E" d="M32 8C18.7 8 8 18.7 8 32s10.7 24 24 24 24-10.7 24-24S45.3 8 32 8z"/>
+        <text x="32" y="36" textAnchor="middle" fill="#FF9900" fontFamily="Arial,sans-serif" fontWeight="bold" fontSize="16">AWS</text>
+        <path d="M16 42c4.5 3.2 10 5 16 5s11.5-1.8 16-5" stroke="#FF9900" strokeWidth="2.5" fill="none" strokeLinecap="round"/>
       </svg>
     ),
     azure: (
-      <svg width={size} height={size} viewBox="0 0 96 96">
-        <defs>
-          <linearGradient id="az-a" x1="58.97" x2="37.63" y1="9.01" y2="100.16" gradientUnits="userSpaceOnUse">
-            <stop offset="0" stopColor="#114A8B"/>
-            <stop offset="1" stopColor="#0669BC"/>
-          </linearGradient>
-          <linearGradient id="az-b" x1="60" x2="53.37" y1="52.44" y2="54.89" gradientUnits="userSpaceOnUse">
-            <stop offset="0" stopOpacity=".3"/>
-            <stop offset=".07" stopOpacity=".2"/>
-            <stop offset="1" stopOpacity="0"/>
-          </linearGradient>
-          <linearGradient id="az-c" x1="46.73" x2="73.72" y1="11.42" y2="99.29" gradientUnits="userSpaceOnUse">
-            <stop offset="0" stopColor="#3CCBF4"/>
-            <stop offset="1" stopColor="#2892DF"/>
-          </linearGradient>
-        </defs>
-        <path fill="url(#az-a)" d="M33.34 6.54h26.04L33.1 89.02a4.33 4.33 0 0 1-4.1 2.97H10.87a4.33 4.33 0 0 1-4.1-5.7L29.24 9.51a4.33 4.33 0 0 1 4.1-2.97z"/>
-        <path fill="url(#az-b)" d="M71.17 60.26H29.88a1.98 1.98 0 0 0-1.35 3.43l26.63 24.86a4.36 4.36 0 0 0 2.98 1.18h21.72z"/>
-        <path fill="url(#az-c)" d="M33.34 6.54a4.3 4.3 0 0 0-4.13 3.06L6.83 86.19a4.33 4.33 0 0 0 4.07 5.8h18.63a4.47 4.47 0 0 0 3.74-2.86l5.23-15.19 18.68 17.44a4.4 4.4 0 0 0 2.78 1.05h21.6l-9.47-31.62H42.48l17.16-48.4H33.34z"/>
+      <svg width={size} height={size} viewBox="0 0 64 64">
+        <rect x="8" y="8" width="48" height="48" rx="12" fill="#0078D4"/>
+        <text x="32" y="38" textAnchor="middle" fill="white" fontFamily="Arial,sans-serif" fontWeight="bold" fontSize="11">Azure</text>
       </svg>
     ),
     gcp: (
-      <svg width={size} height={size} viewBox="0 0 24 24">
-        <path fill="#EA4335" d="M14.5 6.1h.8l2.3-2.3.1-1C15.7 1 13 0 10 0 6 0 2.6 2.2 1 5.4l2 1.5.3-.1c1-1.8 2.7-3.1 4.7-3.5 2.1-.5 4.3 0 5.9 1.3l.6-.5z"/>
-        <path fill="#4285F4" d="M20.3 7.8c-.7-2-2-3.7-3.6-5l-2.8 2.8c1.2.9 2 2.3 2.1 3.8v.5c1.4 0 2.5 1.1 2.5 2.5s-1.1 2.5-2.5 2.5H10l-.5.5v3l.5.5h6c2.8 0 5.2-2.1 5.4-4.9.2-2-.7-3.8-2-5.1l.9-1.1z"/>
-        <path fill="#34A853" d="M4 18.9h6v-3H4c-.4 0-.7-.1-1.1-.2l-.7.2L0 18.1l-.2.7C1.3 20.1 2.6 21 4 21l1.1-2.1H4z"/>
-        <path fill="#FBBC05" d="M4 7.1C1.2 7.3-1 9.7-.9 12.5c0 1.7.8 3.2 2.1 4.2l2.2-2.2C2.5 13.8 2 12.8 2 11.6c0-1.4 1.1-2.5 2.5-2.5.5 0 .9.1 1.3.4l2.2-2.2C6.8 6.4 5.4 6 4 6v1.1z"/>
+      <svg width={size} height={size} viewBox="0 0 64 64">
+        <rect x="8" y="8" width="48" height="48" rx="12" fill="#4285F4"/>
+        <text x="32" y="38" textAnchor="middle" fill="white" fontFamily="Arial,sans-serif" fontWeight="bold" fontSize="12">GCP</text>
       </svg>
     ),
 

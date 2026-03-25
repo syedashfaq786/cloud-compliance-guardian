@@ -83,6 +83,13 @@ export default function ConnectView() {
     }
   };
 
+  const handleAwsDisconnect = async () => {
+    try {
+      await fetch(`${API}/api/aws/disconnect`, { method: "POST" });
+      setAwsStatus({ connected: false });
+    } catch {}
+  };
+
   // ── GitHub Functions ───────────────────────────────────────────────────
 
   const fetchConnectedRepo = async () => {
@@ -241,6 +248,14 @@ export default function ConnectView() {
                     {isAwsConnected ? `Connected (${awsStatus.region || "us-east-1"})` : "Click to connect"}
                   </span>
                 )}
+                {isAwsConnected && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); handleAwsDisconnect(); }}
+                    style={{ marginTop: 6, padding: "4px 12px", fontSize: 11, background: "rgba(220,53,69,0.1)", color: "#dc3545", border: "1px solid rgba(220,53,69,0.3)", borderRadius: 6, cursor: "pointer", fontWeight: 500 }}
+                  >
+                    Disconnect
+                  </button>
+                )}
                 {!isAws && (
                   <span style={{ fontSize: 11, marginTop: 4, color: "var(--text-muted)" }}>Coming soon</span>
                 )}
@@ -363,7 +378,7 @@ export default function ConnectView() {
               </button>
             </div>
             <p style={{ fontSize: 11, color: "var(--text-secondary)", marginTop: 12, textAlign: "center" }}>
-              Credentials are stored in memory only for this session. Never persisted to disk.
+              Credentials are saved locally and persist across restarts. Click Disconnect to remove them.
             </p>
           </div>
         </div>

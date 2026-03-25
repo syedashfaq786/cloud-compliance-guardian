@@ -30,6 +30,9 @@ dashboard/node_modules/
 # Cloned repos
 auditor/repos/
 
+# Persisted credentials & cache (never commit)
+auditor/.data/
+
 # IDE
 .vscode/
 .idea/

@@ -16,11 +16,18 @@ import csv
 import io
 import json
 import threading
+from pathlib import Path
 from typing import Optional
 from datetime import datetime, timezone
 
 from dotenv import load_dotenv
 load_dotenv()
+
+# ─── Persistence Paths ───────────────────────────────────────────────────────
+_DATA_DIR = Path(__file__).parent / ".data"
+_DATA_DIR.mkdir(exist_ok=True)
+_AWS_CREDS_FILE = _DATA_DIR / "aws_credentials.json"
+_AWS_SCAN_CACHE_FILE = _DATA_DIR / "aws_scan_cache.json"
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import StreamingResponse
@@ -66,8 +73,11 @@ app.add_middleware(
 
 @app.on_event("startup")
 def startup():
-    """Initialize the database on startup."""
+    """Initialize the database and restore persisted state on startup."""
+    global _aws_scan_cache
     init_db()
+    _load_aws_credentials()
+    _aws_scan_cache = _load_scan_cache()
 
 
 # ─── Request/Response Models ─────────────────────────────────────────────────
@@ -429,6 +439,57 @@ class AWSCredentialsRequest(BaseModel):
 _aws_scan_cache: dict = {}
 
 
+def _save_aws_credentials(access_key: str, secret_key: str, region: str):
+    """Persist AWS credentials to disk so they survive server restarts."""
+    _AWS_CREDS_FILE.write_text(json.dumps({
+        "access_key": access_key,
+        "secret_key": secret_key,
+        "region": region,
+    }))
+
+
+def _load_aws_credentials():
+    """Load persisted AWS credentials on startup."""
+    if _AWS_CREDS_FILE.exists():
+        try:
+            creds = json.loads(_AWS_CREDS_FILE.read_text())
+            if creds.get("access_key") and creds.get("secret_key"):
+                os.environ["AWS_ACCESS_KEY_ID"] = creds["access_key"]
+                os.environ["AWS_SECRET_ACCESS_KEY"] = creds["secret_key"]
+                os.environ["AWS_DEFAULT_REGION"] = creds.get("region", "us-east-1")
+                return True
+        except Exception:
+            pass
+    return False
+
+
+def _delete_aws_credentials():
+    """Remove persisted AWS credentials from disk."""
+    if _AWS_CREDS_FILE.exists():
+        _AWS_CREDS_FILE.unlink()
+    os.environ.pop("AWS_ACCESS_KEY_ID", None)
+    os.environ.pop("AWS_SECRET_ACCESS_KEY", None)
+    os.environ.pop("AWS_DEFAULT_REGION", None)
+
+
+def _save_scan_cache(data: dict):
+    """Persist scan results to disk."""
+    try:
+        _AWS_SCAN_CACHE_FILE.write_text(json.dumps(data, default=str))
+    except Exception:
+        pass
+
+
+def _load_scan_cache() -> dict:
+    """Load persisted scan cache on startup."""
+    if _AWS_SCAN_CACHE_FILE.exists():
+        try:
+            return json.loads(_AWS_SCAN_CACHE_FILE.read_text())
+        except Exception:
+            pass
+    return {}
+
+
 @app.get("/api/aws/status")
 def aws_connection_status():
     """Check if AWS credentials are configured and valid."""
@@ -439,7 +500,7 @@ def aws_connection_status():
 
 @app.post("/api/aws/configure")
 def configure_aws(creds: AWSCredentialsRequest):
-    """Save AWS credentials to environment (session only, not persisted to disk)."""
+    """Save AWS credentials and persist to disk until user disconnects."""
     # Strip whitespace — copy-paste often adds trailing spaces/newlines
     access_key = creds.access_key.strip()
     secret_key = creds.secret_key.strip()
@@ -458,7 +519,21 @@ def configure_aws(creds: AWSCredentialsRequest):
         os.environ.pop("AWS_SECRET_ACCESS_KEY", None)
         return {"status": "error", "message": result.get("error", "Invalid credentials")}
 
+    # Persist credentials to disk
+    _save_aws_credentials(access_key, secret_key, region)
+
     return {"status": "connected", **result}
+
+
+@app.post("/api/aws/disconnect")
+def disconnect_aws():
+    """Disconnect AWS account — removes persisted credentials."""
+    global _aws_scan_cache
+    _delete_aws_credentials()
+    _aws_scan_cache = {}
+    if _AWS_SCAN_CACHE_FILE.exists():
+        _AWS_SCAN_CACHE_FILE.unlink()
+    return {"status": "disconnected"}
 
 
 @app.post("/api/aws/scan")
@@ -487,6 +562,7 @@ def run_aws_scan():
     }
 
     _aws_scan_cache = result
+    _save_scan_cache(result)
     return result
 
 
