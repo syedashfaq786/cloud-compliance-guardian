@@ -26,19 +26,21 @@ function DashboardOverview() {
       .then((r) => r.json())
       .then((data) => setSummary(data))
       .catch(() => {});
-    fetch(`${API_BASE}/api/audits`)
+    fetch(`${API_BASE}/api/audits?limit=5`)
       .then((r) => r.json())
-      .then((data) => setRecentAudits(data.slice(0, 5)))
+      .then((data) => setRecentAudits(data.audits || []))
       .catch(() => {});
   }, []);
 
-  const score = summary?.compliance_score ?? 78.5;
-  const totalAudits = summary?.total_audits ?? 24;
-  const totalFindings = summary?.total_findings ?? 8;
+  const score = summary?.compliance_score ?? 0;
+  const totalAudits = summary?.total_audits ?? 0;
+  const totalFindings = summary?.total_findings ?? 0;
+  const resourcesScanned = summary?.resources_scanned ?? 0;
   const sev = summary?.severity_breakdown || {};
-  const criticalCount = sev.critical ?? 4;
-  const highCount = sev.high ?? 3;
-  const passRate = totalFindings > 0 ? ((156 - totalFindings) / 156 * 100).toFixed(1) : "100.0";
+  const criticalCount = sev.critical ?? 0;
+  const highCount = sev.high ?? 0;
+  const compliantResources = resourcesScanned > 0 ? resourcesScanned - totalFindings : 0;
+  const passRate = resourcesScanned > 0 ? ((compliantResources / resourcesScanned) * 100).toFixed(1) : "0";
 
   return (
     <>
@@ -59,27 +61,27 @@ function DashboardOverview() {
         <div className="glass-card stat-card stat-blue animate-slide-in stagger-1">
           <div className="stat-card-top">
             <div className="stat-icon"><Icon name="folder" size={22} /></div>
-            <span className="stat-change positive"><Icon name="arrow-up" size={10} /> 12%</span>
+            {totalAudits > 0 && <span className="stat-change positive"><Icon name="arrow-up" size={10} /> {totalAudits}</span>}
           </div>
           <div className="stat-value">{totalAudits}</div>
           <div className="stat-label">Total Audits</div>
-          <div className="stat-bar"><div className="stat-bar-fill" style={{ width: "72%" }}></div></div>
+          <div className="stat-bar"><div className="stat-bar-fill" style={{ width: `${Math.min(totalAudits * 10, 100)}%` }}></div></div>
         </div>
 
         <div className="glass-card stat-card stat-purple animate-slide-in stagger-2">
           <div className="stat-card-top">
             <div className="stat-icon"><Icon name="shield" size={22} /></div>
-            <span className="stat-change positive"><Icon name="arrow-up" size={10} /> 8 new</span>
+            {resourcesScanned > 0 && <span className="stat-change positive"><Icon name="arrow-up" size={10} /> {resourcesScanned}</span>}
           </div>
-          <div className="stat-value">156</div>
+          <div className="stat-value">{resourcesScanned}</div>
           <div className="stat-label">Resources Scanned</div>
-          <div className="stat-bar"><div className="stat-bar-fill" style={{ width: "85%" }}></div></div>
+          <div className="stat-bar"><div className="stat-bar-fill" style={{ width: `${Math.min(resourcesScanned * 3, 100)}%` }}></div></div>
         </div>
 
         <div className="glass-card stat-card stat-amber animate-slide-in stagger-3">
           <div className="stat-card-top">
             <div className="stat-icon"><Icon name="search" size={22} /></div>
-            <span className="stat-change negative"><Icon name="arrow-up" size={10} /> 2 new</span>
+            {totalFindings > 0 && <span className="stat-change negative"><Icon name="arrow-up" size={10} /> {totalFindings}</span>}
           </div>
           <div className="stat-value">{totalFindings}</div>
           <div className="stat-label">Open Violations</div>
@@ -89,9 +91,9 @@ function DashboardOverview() {
         <div className="glass-card stat-card stat-green animate-slide-in stagger-4">
           <div className="stat-card-top">
             <div className="stat-icon"><Icon name="circle-check" size={22} /></div>
-            <span className="stat-change positive">{passRate}%</span>
+            {compliantResources > 0 && <span className="stat-change positive">{passRate}%</span>}
           </div>
-          <div className="stat-value">{156 - totalFindings}</div>
+          <div className="stat-value">{compliantResources}</div>
           <div className="stat-label">Compliant Resources</div>
           <div className="stat-bar"><div className="stat-bar-fill" style={{ width: `${passRate}%` }}></div></div>
         </div>

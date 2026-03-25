@@ -12,13 +12,18 @@ Endpoints:
 """
 
 import os
+import csv
+import io
+import json
 import threading
 from typing import Optional
+from datetime import datetime, timezone
 
 from dotenv import load_dotenv
 load_dotenv()
 
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -173,6 +178,66 @@ def trigger_scan(request: ScanRequest):
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/audits/{audit_id}/report")
+def download_audit_report(audit_id: str, format: str = Query("csv", regex="^(csv|json)$")):
+    """Download an audit report as CSV or JSON."""
+    session = get_session()
+    try:
+        audit = get_audit_by_id(session, audit_id)
+        if not audit:
+            raise HTTPException(status_code=404, detail="Audit not found")
+
+        findings = get_findings_by_audit(session, audit.id)
+        audit_data = audit.to_dict()
+        findings_data = [f.to_dict() for f in findings]
+
+        if format == "json":
+            report = {
+                "report_title": "Cloud Compliance Guardian — Audit Report",
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "audit": audit_data,
+                "summary": {
+                    "total_checks": len(findings_data),
+                    "passed": sum(1 for f in findings_data if f.get("status") == "PASS"),
+                    "failed": sum(1 for f in findings_data if f.get("status") == "FAIL"),
+                    "compliance_score": audit_data["compliance_score"],
+                },
+                "findings": findings_data,
+            }
+            content = json.dumps(report, indent=2)
+            return StreamingResponse(
+                io.BytesIO(content.encode()),
+                media_type="application/json",
+                headers={"Content-Disposition": f"attachment; filename=audit-report-{audit_id}.json"},
+            )
+
+        # CSV format
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow([
+            "Status", "Severity", "Rule ID", "Rule Title", "Resource",
+            "Resource Type", "Cloud Provider", "File", "Description",
+            "Expected", "Actual", "Recommendation", "Remediation HCL"
+        ])
+        for f in findings_data:
+            writer.writerow([
+                f.get("status", ""), f.get("severity", ""), f.get("rule_id", ""),
+                f.get("rule_title", ""), f.get("resource_address", ""),
+                f.get("resource_type", ""), f.get("cloud_provider", ""),
+                f.get("file_path", ""), f.get("description", ""),
+                f.get("expected", ""), f.get("actual", ""),
+                f.get("recommendation", ""), f.get("remediation_hcl", ""),
+            ])
+        content = output.getvalue()
+        return StreamingResponse(
+            io.BytesIO(content.encode()),
+            media_type="text/csv",
+            headers={"Content-Disposition": f"attachment; filename=audit-report-{audit_id}.csv"},
+        )
+    finally:
+        session.close()
 
 
 @app.post("/api/drift/{alert_id}/ack")

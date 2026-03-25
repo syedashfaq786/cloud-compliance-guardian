@@ -99,6 +99,11 @@ class Finding(Base):
     description = Column(Text, nullable=False)
     remediation_hcl = Column(Text, default="")
     reasoning = Column(Text, default="")
+    expected = Column(Text, default="")
+    actual = Column(Text, default="")
+    recommendation = Column(Text, default="")
+    cloud_provider = Column(String(32), default="AWS")
+    check_status = Column(String(16), default="FAIL")  # "PASS" or "FAIL"
     confidence = Column(Float, default=0.0)
     is_resolved = Column(Boolean, default=False)
     resolved_at = Column(DateTime, nullable=True)
@@ -118,6 +123,11 @@ class Finding(Base):
             "description": self.description,
             "remediation_hcl": self.remediation_hcl,
             "reasoning": self.reasoning,
+            "expected": self.expected,
+            "actual": self.actual,
+            "recommendation": self.recommendation,
+            "cloud_provider": self.cloud_provider,
+            "status": self.check_status,
             "confidence": self.confidence,
             "is_resolved": self.is_resolved,
             "created_at": self.created_at.isoformat() if self.created_at else None,
@@ -246,6 +256,11 @@ def save_audit(session: Session, audit_data: Dict[str, Any]) -> Audit:
             description=finding_data.get("description", ""),
             remediation_hcl=finding_data.get("remediation_hcl", ""),
             reasoning=finding_data.get("reasoning", ""),
+            expected=finding_data.get("expected", ""),
+            actual=finding_data.get("actual", ""),
+            recommendation=finding_data.get("recommendation", ""),
+            cloud_provider=finding_data.get("cloud_provider", "AWS"),
+            check_status=finding_data.get("status", "FAIL"),
             confidence=finding_data.get("confidence", 0.0),
         )
         session.add(finding)
@@ -330,9 +345,10 @@ def get_compliance_summary(session: Session) -> Dict[str, Any]:
     )
     if not latest:
         return {
-            "compliance_score": 100.0,
+            "compliance_score": 0,
             "total_audits": 0,
             "total_findings": 0,
+            "resources_scanned": 0,
             "severity_breakdown": {},
         }
 
@@ -342,6 +358,7 @@ def get_compliance_summary(session: Session) -> Dict[str, Any]:
         "compliance_score": latest.compliance_score,
         "total_audits": total_audits,
         "total_findings": latest.total_findings,
+        "resources_scanned": latest.resources_scanned,
         "latest_audit_id": latest.audit_id,
         "latest_audit_date": latest.created_at.isoformat() if latest.created_at else None,
         "severity_breakdown": {

@@ -15,6 +15,7 @@ from .inference import InferenceClient, ViolationFinding
 from .cis_rules import get_rules_for_resource_type, Severity
 from .remediation import enrich_remediation
 from .database import init_db, get_session, save_audit, save_drift_alert, get_recent_audits
+from .rule_engine import run_rule_based_audit, get_audit_summary, detect_cloud_provider
 
 
 @dataclass
@@ -182,43 +183,25 @@ def run_audit(
         report.compliance_score = 100.0
         return report
 
-    # ── Step 2: Analyze with Sec-8B ───────────────────────────────────────
-    client = InferenceClient(
-        endpoint=endpoint,
-        model=model,
-        backend=backend,
-    )
+    # ── Step 2: Run rule-based audit engine ─────────────────────────────
+    rule_findings = run_rule_based_audit(parse_result.resources)
+    summary = get_audit_summary(rule_findings)
 
-    all_findings: List[ViolationFinding] = []
+    # Separate PASS and FAIL findings
+    failed_findings = [f for f in rule_findings if f.status == "FAIL"]
+    passed_findings = [f for f in rule_findings if f.status == "PASS"]
 
+    # Track compliant resources
+    failed_addresses = set(f.resource_address for f in failed_findings)
     for resource in parse_result.resources:
-        applicable_rules = get_rules_for_resource_type(resource.resource_type)
-        if not applicable_rules:
+        if resource.address not in failed_addresses:
             report.compliant_resources.append(resource.address)
-            continue
 
-        raw_hcl = parser.get_raw_content(resource.file_path)
-        findings = client.analyze_resource(resource, raw_hcl)
-
-        # ── Step 3: Enrich remediations ───────────────────────────────────
-        for finding in findings:
-            finding.remediation_hcl = enrich_remediation(
-                finding.rule_id,
-                finding.remediation_hcl,
-                resource.resource_name,
-            )
-
-        if not findings:
-            report.compliant_resources.append(resource.address)
-        else:
-            all_findings.extend(findings)
-
-    # ── Step 4: Calculate score and counts ─────────────────────────────────
-    report.compliance_score = _calculate_compliance_score(
-        all_findings, parse_result.resource_count
-    )
-    report.severity_counts = _count_severities(all_findings)
-    report.findings = [f.to_dict() for f in all_findings]
+    # ── Step 3: Calculate score and counts ─────────────────────────────────
+    report.compliance_score = summary["compliance_score"]
+    report.severity_counts = summary["severity_counts"]
+    # Include ALL findings (both PASS and FAIL) for detailed reporting
+    report.findings = [f.to_dict() for f in rule_findings]
 
     # ── Step 5: Store in database ─────────────────────────────────────────
     if store_results:
@@ -230,7 +213,7 @@ def run_audit(
                 "directory": directory,
                 "files_scanned": report.files_scanned,
                 "resources_scanned": report.resources_scanned,
-                "total_findings": report.total_findings,
+                "total_findings": summary["failed"],
                 "critical_count": report.severity_counts.get("CRITICAL", 0),
                 "high_count": report.severity_counts.get("HIGH", 0),
                 "medium_count": report.severity_counts.get("MEDIUM", 0),
@@ -245,9 +228,19 @@ def run_audit(
         except Exception:
             pass  # Don't fail the audit if DB is unavailable
 
-    # ── Step 6: Detect drift ──────────────────────────────────────────────
+    # ── Step 5: Detect drift ──────────────────────────────────────────────
     if store_results:
-        _detect_drift(all_findings, audit_id)
+        # Convert rule findings to ViolationFinding format for drift detection
+        violation_findings = [
+            ViolationFinding(
+                rule_id=f.rule_id, rule_title=f.rule_title,
+                severity=f.severity, resource_address=f.resource_address,
+                resource_type=f.resource_type, file_path=f.file_path,
+                description=f.description, reasoning=f.reasoning,
+            )
+            for f in failed_findings
+        ]
+        _detect_drift(violation_findings, audit_id)
 
     report.status = "completed"
     return report
