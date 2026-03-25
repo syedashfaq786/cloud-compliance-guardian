@@ -440,14 +440,22 @@ def aws_connection_status():
 @app.post("/api/aws/configure")
 def configure_aws(creds: AWSCredentialsRequest):
     """Save AWS credentials to environment (session only, not persisted to disk)."""
-    os.environ["AWS_ACCESS_KEY_ID"] = creds.access_key
-    os.environ["AWS_SECRET_ACCESS_KEY"] = creds.secret_key
-    os.environ["AWS_DEFAULT_REGION"] = creds.region or "us-east-1"
+    # Strip whitespace — copy-paste often adds trailing spaces/newlines
+    access_key = creds.access_key.strip()
+    secret_key = creds.secret_key.strip()
+    region = (creds.region or "us-east-1").strip()
 
-    # Test the credentials
-    scanner = AWSScanner(creds.access_key, creds.secret_key, creds.region)
+    os.environ["AWS_ACCESS_KEY_ID"] = access_key
+    os.environ["AWS_SECRET_ACCESS_KEY"] = secret_key
+    os.environ["AWS_DEFAULT_REGION"] = region
+
+    # Test the credentials with a fresh scanner
+    scanner = AWSScanner(access_key, secret_key, region)
     result = scanner.test_connection()
     if not result.get("connected"):
+        # Clean up env vars on failure so status endpoint doesn't show stale creds
+        os.environ.pop("AWS_ACCESS_KEY_ID", None)
+        os.environ.pop("AWS_SECRET_ACCESS_KEY", None)
         return {"status": "error", "message": result.get("error", "Invalid credentials")}
 
     return {"status": "connected", **result}

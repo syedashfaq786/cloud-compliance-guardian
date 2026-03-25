@@ -58,6 +58,11 @@ class AWSScanner:
         except NoCredentialsError:
             return {"connected": False, "error": "No AWS credentials configured"}
         except ClientError as e:
+            code = e.response.get("Error", {}).get("Code", "")
+            if code == "SignatureDoesNotMatch":
+                return {"connected": False, "error": "Secret Access Key is incorrect. Please re-copy it from the AWS IAM console (watch for extra spaces)."}
+            if code == "InvalidClientTokenId":
+                return {"connected": False, "error": "Access Key ID is invalid or has been deactivated."}
             return {"connected": False, "error": str(e)}
         except Exception as e:
             return {"connected": False, "error": str(e)}

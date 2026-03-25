@@ -29,6 +29,7 @@ export default function ConnectView() {
   const [awsRegion, setAwsRegion] = useState("us-east-1");
   const [awsConfiguring, setAwsConfiguring] = useState(false);
   const [awsError, setAwsError] = useState("");
+  const [showSecret, setShowSecret] = useState(false);
 
   const providers = [
     { id: "aws", name: "AWS", description: "Amazon Web Services", logo: "/logos/aws.svg", icon: "aws", connectable: true },
@@ -64,7 +65,7 @@ export default function ConnectView() {
       const res = await fetch(`${API}/api/aws/configure`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ access_key: accessKey, secret_key: secretKey, region: awsRegion }),
+        body: JSON.stringify({ access_key: accessKey.trim(), secret_key: secretKey.trim(), region: awsRegion }),
       });
       const data = await res.json();
       if (data.status === "connected") {
@@ -323,13 +324,21 @@ export default function ConnectView() {
               <label style={{ display: "block", fontSize: 13, fontWeight: 500, marginBottom: 6, color: "var(--text-secondary)" }}>Access Key ID</label>
               <input type="text" value={accessKey} onChange={(e) => { setAccessKey(e.target.value); setAwsError(""); }}
                 placeholder="AKIAIOSFODNN7EXAMPLE"
+                autoComplete="off" autoCorrect="off" spellCheck="false" data-form-type="other"
                 style={{ width: "100%", padding: "10px 14px", borderRadius: 8, border: "1px solid var(--border-color)", background: "var(--bg-secondary)", color: "var(--text-primary)", fontSize: 14, outline: "none", boxSizing: "border-box", fontFamily: "monospace" }} />
             </div>
             <div style={{ marginBottom: 16 }}>
               <label style={{ display: "block", fontSize: 13, fontWeight: 500, marginBottom: 6, color: "var(--text-secondary)" }}>Secret Access Key</label>
-              <input type="password" value={secretKey} onChange={(e) => { setSecretKey(e.target.value); setAwsError(""); }}
-                placeholder="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
-                style={{ width: "100%", padding: "10px 14px", borderRadius: 8, border: "1px solid var(--border-color)", background: "var(--bg-secondary)", color: "var(--text-primary)", fontSize: 14, outline: "none", boxSizing: "border-box", fontFamily: "monospace" }} />
+              <div style={{ position: "relative" }}>
+                <input type={showSecret ? "text" : "password"} value={secretKey} onChange={(e) => { setSecretKey(e.target.value); setAwsError(""); }}
+                  placeholder="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+                  autoComplete="new-password" autoCorrect="off" spellCheck="false" data-form-type="other"
+                  style={{ width: "100%", padding: "10px 14px", paddingRight: 44, borderRadius: 8, border: "1px solid var(--border-color)", background: "var(--bg-secondary)", color: "var(--text-primary)", fontSize: 14, outline: "none", boxSizing: "border-box", fontFamily: "monospace" }} />
+                <button type="button" onClick={() => setShowSecret(!showSecret)}
+                  style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", padding: 4, color: "var(--text-muted)", fontSize: 12 }}>
+                  {showSecret ? "Hide" : "Show"}
+                </button>
+              </div>
             </div>
             <div style={{ marginBottom: 20 }}>
               <label style={{ display: "block", fontSize: 13, fontWeight: 500, marginBottom: 6, color: "var(--text-secondary)" }}>Region</label>
