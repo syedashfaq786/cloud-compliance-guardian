@@ -116,11 +116,15 @@ export default function AuditsView() {
             <Icon name="arrow-up" size={14} style={{ transform: "rotate(-90deg)" }} /> Back to Audits
           </button>
           <div style={{ display: "flex", gap: 8 }}>
+            <button className="save-btn" onClick={() => downloadReport("pdf")} disabled={downloading}
+              style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 16px" }}>
+              <Icon name="file-text" size={14} /> {downloading ? "Generating..." : "Download Report (PDF)"}
+            </button>
             <button className="download-btn" onClick={() => downloadReport("csv")} disabled={downloading}>
-              <Icon name="file-text" size={14} /> {downloading ? "Downloading..." : "Download CSV"}
+              <Icon name="file-text" size={14} /> CSV
             </button>
             <button className="download-btn" onClick={() => downloadReport("json")} disabled={downloading}>
-              <Icon name="file-text" size={14} /> Download JSON
+              <Icon name="file-text" size={14} /> JSON
             </button>
           </div>
         </div>

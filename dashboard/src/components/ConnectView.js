@@ -108,6 +108,9 @@ export default function ConnectView() {
       setConnectedRepo({ ...data, connected: true });
       setShowGitHubModal(false);
       setRepoUrl("");
+      if (data.scan_triggered) {
+        setSyncResult({ message: data.message || "Repository cloned and scan started. Check the Audits tab for results." });
+      }
     } catch (err) { setGithubError(err.message); }
     finally { setConnecting(false); }
   };

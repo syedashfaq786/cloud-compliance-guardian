@@ -181,8 +181,8 @@ def trigger_scan(request: ScanRequest):
 
 
 @app.get("/api/audits/{audit_id}/report")
-def download_audit_report(audit_id: str, format: str = Query("csv", regex="^(csv|json)$")):
-    """Download an audit report as CSV or JSON."""
+def download_audit_report(audit_id: str, format: str = Query("pdf", pattern="^(pdf|csv|json)$")):
+    """Download an audit report as PDF, CSV, or JSON."""
     session = get_session()
     try:
         audit = get_audit_by_id(session, audit_id)
@@ -192,6 +192,15 @@ def download_audit_report(audit_id: str, format: str = Query("csv", regex="^(csv
         findings = get_findings_by_audit(session, audit.id)
         audit_data = audit.to_dict()
         findings_data = [f.to_dict() for f in findings]
+
+        if format == "pdf":
+            from .report_generator import generate_pdf_report
+            pdf_bytes = generate_pdf_report(audit_data, findings_data)
+            return StreamingResponse(
+                io.BytesIO(pdf_bytes),
+                media_type="application/pdf",
+                headers={"Content-Disposition": f"attachment; filename=audit-report-{audit_id}.pdf"},
+            )
 
         if format == "json":
             report = {
@@ -258,7 +267,7 @@ def ack_drift_alert(alert_id: int):
 
 @app.post("/api/github/connect")
 def connect_github(request: GitHubConnectRequest):
-    """Clone a GitHub repo and save it to the database."""
+    """Clone a GitHub repo, save to DB, and auto-trigger a scan."""
     try:
         repo_name = clone_repo(request.url)
         metadata = get_repo_metadata(repo_name)
@@ -266,11 +275,31 @@ def connect_github(request: GitHubConnectRequest):
         session = get_session()
         try:
             repo = save_github_repo(session, repo_name, request.url)
+            repo_id = repo.id
             result = repo.to_dict()
             result["metadata"] = metadata
-            return result
         finally:
             session.close()
+
+        # Auto-trigger scan in background after cloning
+        def _auto_scan():
+            try:
+                sync_and_scan(repo_name)
+            except Exception:
+                pass
+            try:
+                s = get_session()
+                update_repo_sync_time(s, repo_id)
+                s.close()
+            except Exception:
+                pass
+
+        thread = threading.Thread(target=_auto_scan, daemon=True)
+        thread.start()
+
+        result["scan_triggered"] = True
+        result["message"] = "Repository cloned and scan started. Check the Audits tab for results."
+        return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
