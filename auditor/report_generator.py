@@ -517,3 +517,234 @@ def generate_pdf_report(audit_data: Dict[str, Any], findings_data: List[Dict[str
     # Build
     doc.build(story, onFirstPage=_header_footer, onLaterPages=_header_footer)
     return buffer.getvalue()
+
+
+def generate_aws_pdf_report(scan_cache: Dict[str, Any]) -> bytes:
+    """Generate a PDF report for AWS live cloud audit results."""
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer, pagesize=A4,
+        topMargin=45, bottomMargin=50, leftMargin=30, rightMargin=30,
+    )
+    styles = _get_styles()
+    story = []
+
+    audit = scan_cache.get("audit", {})
+    scan = scan_cache.get("scan", {})
+    region = scan_cache.get("region", "unknown")
+    scan_time = scan_cache.get("scan_time", "")
+    findings = audit.get("findings", [])
+    health = audit.get("health_score", 0)
+    total_checks = audit.get("total_checks", 0)
+    passed = audit.get("passed", 0)
+    failed_count = audit.get("failed", 0)
+    failed = [f for f in findings if f.get("status") == "FAIL"]
+    passed_findings = [f for f in findings if f.get("status") == "PASS"]
+
+    # ═════════════════════════════════════════════════════════════════════
+    # TITLE
+    # ═════════════════════════════════════════════════════════════════════
+    story.append(Spacer(1, 30))
+    story.append(Paragraph("Cloud Compliance Guardian", styles["ReportTitle"]))
+    story.append(Paragraph("AWS Live Infrastructure Audit Report", styles["ReportSubtitle"]))
+
+    meta = [
+        ["Cloud Provider", "Amazon Web Services (AWS)"],
+        ["Region", region],
+        ["Scan Time", scan_time or datetime.now(timezone.utc).strftime("%B %d, %Y at %H:%M UTC")],
+        ["Resources Scanned", f"S3: {scan.get('s3_buckets', 0)}, Security Groups: {scan.get('security_groups', 0)}, IAM Policies: {scan.get('iam_policies', 0)}, IAM Users: {scan.get('iam_users', 0)}"],
+    ]
+    meta_table = Table(meta, colWidths=[120, 400])
+    meta_table.setStyle(TableStyle([
+        ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 9),
+        ("TEXTCOLOR", (0, 0), (0, -1), TEXT_MUTED),
+        ("TEXTCOLOR", (1, 0), (1, -1), TEXT_DARK),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        ("TOPPADDING", (0, 0), (-1, -1), 6),
+        ("LINEBELOW", (0, 0), (-1, -2), 0.5, BORDER_GRAY),
+    ]))
+    story.append(meta_table)
+    story.append(Spacer(1, 20))
+
+    # ═════════════════════════════════════════════════════════════════════
+    # EXECUTIVE SUMMARY
+    # ═════════════════════════════════════════════════════════════════════
+    story.append(HRFlowable(width="100%", thickness=1, color=BRAND_ORANGE, spaceAfter=4))
+    story.append(Paragraph("1. Executive Summary", styles["SectionHeader"]))
+
+    grade = _score_grade(health)
+    grade_color = _score_color(health)
+
+    score_text = f'<font color="{grade_color.hexval()}" size="28"><b>{health:.1f}%</b></font>'
+    grade_label = f'<font color="{grade_color.hexval()}" size="14">Grade: {grade}</font>'
+    summary_items = [
+        f"<b>Total Checks:</b> {total_checks}",
+        f'<b>Passed:</b> <font color="{PASS_GREEN.hexval()}">{passed}</font>',
+        f'<b>Failed:</b> <font color="{FAIL_RED.hexval()}">{failed_count}</font>',
+    ]
+
+    score_para = Paragraph(score_text + "<br/>" + grade_label, ParagraphStyle(
+        "ScoreInlineAWS", fontSize=28, alignment=TA_CENTER, leading=36,
+    ))
+    summary_para = Paragraph("<br/>".join(summary_items), styles["BodyText2"])
+
+    score_table = Table([[score_para, summary_para]], colWidths=[150, 380])
+    score_table.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("BACKGROUND", (0, 0), (0, 0), LIGHT_GRAY),
+        ("BOX", (0, 0), (-1, -1), 0.5, BORDER_GRAY),
+        ("LEFTPADDING", (0, 0), (-1, -1), 16),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 16),
+        ("TOPPADDING", (0, 0), (-1, -1), 12),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 12),
+    ]))
+    story.append(score_table)
+    story.append(Spacer(1, 12))
+
+    # Severity breakdown
+    sev_counts = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0}
+    for f in failed:
+        sev = f.get("severity", "MEDIUM").upper()
+        if sev in sev_counts:
+            sev_counts[sev] += 1
+
+    action_map = {
+        "CRITICAL": "Immediate remediation required (within 24h)",
+        "HIGH": "Remediate promptly (within 1 week)",
+        "MEDIUM": "Plan remediation in next sprint (within 30 days)",
+        "LOW": "Address during routine maintenance (within 90 days)",
+    }
+
+    sev_rows = [[
+        Paragraph("<b>Severity</b>", styles["BodyText2"]),
+        Paragraph("<b>Count</b>", styles["BodyText2"]),
+        Paragraph("<b>Action Required</b>", styles["BodyText2"]),
+    ]]
+    for sev_name in ["CRITICAL", "HIGH", "MEDIUM", "LOW"]:
+        count = sev_counts[sev_name]
+        if count > 0:
+            color = SEVERITY_COLORS[sev_name].hexval()
+            sev_rows.append([
+                Paragraph(f'<font color="{color}"><b>{sev_name}</b></font>', styles["BodyText2"]),
+                Paragraph(str(count), styles["BodyText2"]),
+                Paragraph(action_map[sev_name], styles["SmallMuted"]),
+            ])
+
+    if len(sev_rows) > 1:
+        story.append(Paragraph("Severity Breakdown", styles["SubSection"]))
+        sev_table = Table(sev_rows, colWidths=[80, 50, 400])
+        sev_table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), LIGHT_GRAY),
+            ("FONTSIZE", (0, 0), (-1, -1), 9),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+            ("TOPPADDING", (0, 0), (-1, -1), 6),
+            ("LINEBELOW", (0, 0), (-1, -1), 0.5, BORDER_GRAY),
+        ]))
+        story.append(sev_table)
+
+    # ═════════════════════════════════════════════════════════════════════
+    # FAILED FINDINGS
+    # ═════════════════════════════════════════════════════════════════════
+    if failed:
+        story.append(Spacer(1, 10))
+        story.append(HRFlowable(width="100%", thickness=1, color=BRAND_ORANGE, spaceAfter=4))
+        story.append(Paragraph(f"2. Failed Checks ({len(failed)})", styles["SectionHeader"]))
+
+        for f in failed:
+            sev = f.get("severity", "MEDIUM").upper()
+            sev_color = SEVERITY_COLORS.get(sev, MEDIUM_AMBER)
+
+            elems = []
+            header = (
+                f'<font color="{sev_color.hexval()}"><b>[{sev}]</b></font> '
+                f'<b>{f.get("rule_id", "")} — {f.get("rule_title", "")}</b>'
+            )
+            elems.append(Paragraph(header, styles["BodyText2"]))
+            elems.append(Spacer(1, 4))
+
+            resource_name = f.get("resource", f.get("resource_name", "N/A"))
+            detail_rows = [
+                ["Resource", str(resource_name)],
+                ["Type", f.get("resource_type", "N/A")],
+                ["Cloud Provider", "AWS"],
+            ]
+            dt = Table(detail_rows, colWidths=[90, 440])
+            dt.setStyle(TableStyle([
+                ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+                ("FONTSIZE", (0, 0), (-1, -1), 8),
+                ("TEXTCOLOR", (0, 0), (0, -1), TEXT_MUTED),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+                ("TOPPADDING", (0, 0), (-1, -1), 2),
+            ]))
+            elems.append(dt)
+            elems.append(Spacer(1, 4))
+
+            desc = f.get("description", "")
+            if desc:
+                elems.append(Paragraph(f"<b>Description:</b> {desc}", styles["BodyText2"]))
+                elems.append(Spacer(1, 2))
+
+            rec = f.get("recommendation", "")
+            if rec:
+                elems.append(Paragraph(
+                    f'<font color="{BRAND_ORANGE.hexval()}"><b>Recommendation:</b></font> {rec}',
+                    styles["BodyText2"]
+                ))
+
+            elems.append(Spacer(1, 6))
+
+            box = Table([[elems]], colWidths=[530])
+            box.setStyle(TableStyle([
+                ("BOX", (0, 0), (-1, -1), 0.5, BORDER_GRAY),
+                ("BACKGROUND", (0, 0), (-1, -1), colors.white),
+                ("LEFTPADDING", (0, 0), (-1, -1), 10),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 10),
+                ("TOPPADDING", (0, 0), (-1, -1), 8),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+            ]))
+            story.append(KeepTogether([box, Spacer(1, 8)]))
+
+    # ═════════════════════════════════════════════════════════════════════
+    # PASSED CHECKS
+    # ═════════════════════════════════════════════════════════════════════
+    if passed_findings:
+        story.append(HRFlowable(width="100%", thickness=1, color=BRAND_ORANGE, spaceAfter=4))
+        section_num = 3 if failed else 2
+        story.append(Paragraph(f"{section_num}. Passed Checks ({len(passed_findings)})", styles["SectionHeader"]))
+
+        pass_rows = [[
+            Paragraph("<b>Rule</b>", styles["BodyText2"]),
+            Paragraph("<b>Resource</b>", styles["BodyText2"]),
+            Paragraph("<b>Status</b>", styles["BodyText2"]),
+        ]]
+        for f in passed_findings:
+            resource_name = f.get("resource", f.get("resource_name", ""))
+            pass_rows.append([
+                Paragraph(f'{f.get("rule_id", "")} — {f.get("rule_title", "")}', styles["SmallMuted"]),
+                Paragraph(str(resource_name), styles["SmallMuted"]),
+                Paragraph('<font color="#22c55e"><b>PASS</b></font>', styles["SmallMuted"]),
+            ])
+
+        pass_table = Table(pass_rows, colWidths=[230, 210, 50])
+        pass_table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), LIGHT_GRAY),
+            ("FONTSIZE", (0, 0), (-1, -1), 8),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ("TOPPADDING", (0, 0), (-1, -1), 4),
+            ("LINEBELOW", (0, 0), (-1, -1), 0.3, BORDER_GRAY),
+        ]))
+        story.append(pass_table)
+
+    # Footer
+    story.append(Spacer(1, 30))
+    story.append(HRFlowable(width="100%", thickness=0.5, color=BORDER_GRAY))
+    story.append(Spacer(1, 8))
+    story.append(Paragraph(
+        "<i>This report was generated by Cloud Compliance Guardian from a live AWS scan. "
+        "Findings reflect the real-time state of your AWS infrastructure at the time of scanning.</i>",
+        styles["SmallMuted"]
+    ))
+
+    doc.build(story, onFirstPage=_header_footer, onLaterPages=_header_footer)
+    return buffer.getvalue()

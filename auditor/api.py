@@ -498,6 +498,69 @@ def get_latest_aws_scan():
     return {"cached": True, **_aws_scan_cache}
 
 
+@app.get("/api/aws/scan/report")
+def download_aws_report(format: str = Query("pdf", pattern="^(pdf|csv|json)$")):
+    """Download the latest AWS live scan report."""
+    if not _aws_scan_cache:
+        raise HTTPException(status_code=404, detail="No scan results. Run a scan first.")
+
+    audit = _aws_scan_cache.get("audit", {})
+    scan = _aws_scan_cache.get("scan", {})
+    findings_list = audit.get("findings", [])
+    region = _aws_scan_cache.get("region", "unknown")
+    scan_time = _aws_scan_cache.get("scan_time", "")
+
+    if format == "json":
+        report = {
+            "report_title": "Cloud Compliance Guardian — AWS Live Audit Report",
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "region": region,
+            "scan_time": scan_time,
+            "scan_summary": scan,
+            "health_score": audit.get("health_score", 0),
+            "total_checks": audit.get("total_checks", 0),
+            "passed": audit.get("passed", 0),
+            "failed": audit.get("failed", 0),
+            "findings": findings_list,
+        }
+        content = json.dumps(report, indent=2, default=str)
+        return StreamingResponse(
+            io.BytesIO(content.encode()),
+            media_type="application/json",
+            headers={"Content-Disposition": f"attachment; filename=aws-audit-report.json"},
+        )
+
+    if format == "csv":
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow([
+            "Status", "Severity", "Rule ID", "Rule Title", "Resource",
+            "Resource Type", "Cloud Provider", "Description", "Recommendation"
+        ])
+        for f in findings_list:
+            writer.writerow([
+                f.get("status", ""), f.get("severity", ""), f.get("rule_id", ""),
+                f.get("rule_title", ""), f.get("resource", f.get("resource_name", "")),
+                f.get("resource_type", ""), "AWS",
+                f.get("description", ""), f.get("recommendation", ""),
+            ])
+        content = output.getvalue()
+        return StreamingResponse(
+            io.BytesIO(content.encode()),
+            media_type="text/csv",
+            headers={"Content-Disposition": f"attachment; filename=aws-audit-report.csv"},
+        )
+
+    # PDF
+    from .report_generator import generate_aws_pdf_report
+    pdf_bytes = generate_aws_pdf_report(_aws_scan_cache)
+    return StreamingResponse(
+        io.BytesIO(pdf_bytes),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename=aws-audit-report.pdf"},
+    )
+
+
 @app.get("/api/aws/events")
 def get_aws_events():
     """Fetch latest CloudTrail events."""

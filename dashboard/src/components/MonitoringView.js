@@ -65,6 +65,27 @@ export default function MonitoringView({ onNavigate }) {
     } catch {}
   };
 
+  const handleDownloadReport = async (format) => {
+    try {
+      const res = await fetch(`${API}/api/aws/scan/report?format=${format}`);
+      if (!res.ok) {
+        const err = await res.json();
+        alert(err.detail || "Report download failed");
+        return;
+      }
+      const blob = await res.blob();
+      const ext = format === "pdf" ? "pdf" : format === "csv" ? "csv" : "json";
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `aws-audit-report.${ext}`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      alert("Failed to download report: " + err.message);
+    }
+  };
+
   const audit = scanResults?.audit;
   const healthScore = audit?.health_score ?? 0;
   const findings = audit?.findings || [];
@@ -122,24 +143,63 @@ export default function MonitoringView({ onNavigate }) {
             <span style={{ color: "#22c55e", marginLeft: 8 }}>● Connected</span>
           </p>
         </div>
-        <button
-          className="save-btn"
-          onClick={handleScan}
-          disabled={scanning}
-          style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 24px" }}
-        >
-          {scanning ? (
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          {scanResults && !scanResults.error && (
             <>
-              <span style={{ width: 16, height: 16, border: "2px solid rgba(255,255,255,0.3)", borderTopColor: "#fff", borderRadius: "50%", animation: "spin 0.8s linear infinite", display: "inline-block" }}></span>
-              Scanning...
-            </>
-          ) : (
-            <>
-              <Icon name="refresh" size={16} />
-              Run Live Scan
+              <button
+                onClick={() => handleDownloadReport("pdf")}
+                style={{
+                  display: "flex", alignItems: "center", gap: 6, padding: "10px 16px",
+                  background: "var(--bg-tertiary)", color: "var(--text-primary)",
+                  border: "1px solid var(--border-color)", borderRadius: 8, cursor: "pointer",
+                  fontSize: 13, fontWeight: 500,
+                }}
+              >
+                <Icon name="download" size={14} /> PDF
+              </button>
+              <button
+                onClick={() => handleDownloadReport("csv")}
+                style={{
+                  display: "flex", alignItems: "center", gap: 6, padding: "10px 12px",
+                  background: "var(--bg-tertiary)", color: "var(--text-secondary)",
+                  border: "1px solid var(--border-color)", borderRadius: 8, cursor: "pointer",
+                  fontSize: 12, fontWeight: 500,
+                }}
+              >
+                CSV
+              </button>
+              <button
+                onClick={() => handleDownloadReport("json")}
+                style={{
+                  display: "flex", alignItems: "center", gap: 6, padding: "10px 12px",
+                  background: "var(--bg-tertiary)", color: "var(--text-secondary)",
+                  border: "1px solid var(--border-color)", borderRadius: 8, cursor: "pointer",
+                  fontSize: 12, fontWeight: 500,
+                }}
+              >
+                JSON
+              </button>
             </>
           )}
-        </button>
+          <button
+            className="save-btn"
+            onClick={handleScan}
+            disabled={scanning}
+            style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 24px" }}
+          >
+            {scanning ? (
+              <>
+                <span style={{ width: 16, height: 16, border: "2px solid rgba(255,255,255,0.3)", borderTopColor: "#fff", borderRadius: "50%", animation: "spin 0.8s linear infinite", display: "inline-block" }}></span>
+                Scanning...
+              </>
+            ) : (
+              <>
+                <Icon name="refresh" size={16} />
+                Run Live Scan
+              </>
+            )}
+          </button>
+        </div>
       </div>
 
       {/* ── Health Gauge + Summary Stats ── */}
