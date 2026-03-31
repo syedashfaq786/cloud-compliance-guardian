@@ -13,6 +13,10 @@ const SEVERITY_META = {
 
 export default function MonitoringView({ onNavigate }) {
   const [awsStatus, setAwsStatus] = useState(null);
+  const [azureStatus, setAzureStatus] = useState(null);
+  const [gcpStatus, setGcpStatus] = useState(null);
+  const [selectedCloud, setSelectedCloud] = useState("aws");
+  
   const [scanning, setScanning] = useState(false);
   const [scanResults, setScanResults] = useState(null);
   const [events, setEvents] = useState([]);
@@ -21,46 +25,70 @@ export default function MonitoringView({ onNavigate }) {
   const [copiedId, setCopiedId] = useState(null);
   const feedRef = useRef(null);
 
-  // Check AWS status on mount
+  // Check all cloud statuses on mount
   useEffect(() => {
-    checkAwsStatus();
+    checkCloudStatuses();
     loadCachedResults();
   }, []);
 
-  const checkAwsStatus = async () => {
+  const checkCloudStatuses = async () => {
     try {
-      const res = await fetch(`${API}/api/aws/status`);
-      const data = await res.json();
-      setAwsStatus(data);
-    } catch {
-      setAwsStatus({ connected: false, error: "Backend unavailable" });
+      const [awsRes, azureRes, gcpRes] = await Promise.all([
+        fetch(`${API}/api/aws/status`),
+        fetch(`${API}/api/azure/status`),
+        fetch(`${API}/api/gcp/status`)
+      ]);
+      
+      const awsData = await awsRes.json();
+      const azureData = await azureRes.json();
+      const gcpData = await gcpRes.json();
+      
+      setAwsStatus(awsData);
+      setAzureStatus(azureData);
+      setGcpStatus(gcpData);
+
+      // Set initial selected cloud based on what's connected
+      if (!awsData.connected) {
+        if (azureData.connected) setSelectedCloud("azure");
+        else if (gcpData.connected) setSelectedCloud("gcp");
+      }
+    } catch (err) {
+      console.error("Failed to check cloud statuses", err);
     }
   };
 
   const loadCachedResults = async () => {
     try {
-      const res = await fetch(`${API}/api/aws/scan/latest`);
+      const res = await fetch(`${API}/api/${selectedCloud}/scan/latest`);
       const data = await res.json();
       if (data.cached) {
         setScanResults(data);
         if (data.audit?.events_analysis?.length) {
           setEvents(data.audit.events_analysis);
         }
+      } else {
+        setScanResults(null);
+        setEvents([]);
       }
     } catch {}
   };
 
+  // Reload data when selected cloud changes
+  useEffect(() => {
+    loadCachedResults();
+  }, [selectedCloud]);
+
   const handleScan = async () => {
     setScanning(true);
     try {
-      const res = await fetch(`${API}/api/aws/scan`, { method: "POST" });
+      const res = await fetch(`${API}/api/${selectedCloud}/scan`, { method: "POST" });
       if (!res.ok) {
         const err = await res.json();
         throw new Error(err.detail || "Scan failed");
       }
       const data = await res.json();
       setScanResults(data);
-      fetchEvents();
+      if (selectedCloud === "aws") fetchEvents();
     } catch (err) {
       setScanResults({ error: err.message });
     } finally {
@@ -78,7 +106,7 @@ export default function MonitoringView({ onNavigate }) {
 
   const handleDownloadReport = async (format) => {
     try {
-      const res = await fetch(`${API}/api/aws/scan/report?format=${format}`);
+      const res = await fetch(`${API}/api/${selectedCloud}/scan/report?format=${format}`);
       if (!res.ok) {
         const err = await res.json();
         alert(err.detail || "Report download failed");
@@ -89,7 +117,7 @@ export default function MonitoringView({ onNavigate }) {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `aws-audit-report.${ext}`;
+      a.download = `${selectedCloud}-audit-report.${ext}`;
       a.click();
       URL.revokeObjectURL(url);
     } catch (err) {
@@ -105,12 +133,57 @@ export default function MonitoringView({ onNavigate }) {
 
   const handleDisconnect = async () => {
     try {
-      await fetch(`${API}/api/aws/disconnect`, { method: "POST" });
-      setAwsStatus({ connected: false });
+      await fetch(`${API}/api/${selectedCloud}/disconnect`, { method: "POST" });
+      checkCloudStatuses();
       setScanResults(null);
       setEvents([]);
     } catch {}
   };
+
+  const isCloudConnected = (cloud) => {
+    if (cloud === "aws") return awsStatus?.connected;
+    if (cloud === "azure") return azureStatus?.connected;
+    if (cloud === "gcp") return gcpStatus?.connected;
+    return false;
+  };
+
+  const anyConnected = awsStatus?.connected || azureStatus?.connected || gcpStatus?.connected;
+
+  // ── Not Connected State — redirect to Connect tab ────────────────────
+  if (!anyConnected && awsStatus !== null) {
+    return (
+      <div className="animate-fade-in">
+        <div className="page-header">
+          <h2>Monitoring</h2>
+          <p>Real-time infrastructure monitoring and CIS compliance scanning.</p>
+        </div>
+
+        <div className="glass-card" style={{ maxWidth: 650, margin: "40px auto", padding: 48, textAlign: "center" }}>
+          <div style={{ display: "flex", justifyContent: "center", gap: 24, marginBottom: 32 }}>
+            <div style={{ padding: "16px", background: "rgba(0,0,0,0.05)", borderRadius: 16 }}>
+              <img src="/logos/aws.svg" alt="AWS" style={{ width: 48, height: 48 }} />
+            </div>
+            <div style={{ padding: "16px", background: "rgba(0,0,0,0.05)", borderRadius: 16 }}>
+              <img src="/logos/azure.svg" alt="Azure" style={{ width: 48, height: 48 }} />
+            </div>
+            <div style={{ padding: "16px", background: "rgba(0,0,0,0.05)", borderRadius: 16 }}>
+              <img src="/logos/gcp.svg" alt="GCP" style={{ width: 48, height: 48 }} />
+            </div>
+          </div>
+          <h3 style={{ fontSize: 22, marginBottom: 8 }}>No Cloud Accounts Connected</h3>
+          <p style={{ color: "var(--text-secondary)", maxWidth: 450, margin: "0 auto 24px" }}>
+            Connect your AWS, Azure, or GCP accounts to enable live infrastructure monitoring and automated compliance scans.
+          </p>
+          <button className="save-btn" onClick={() => onNavigate && onNavigate("connect")} style={{ padding: "12px 32px", fontSize: 15, display: "inline-flex", alignItems: "center", gap: 8 }}>
+            <Icon name="cloud-plus" size={18} /> Go to Connect
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const currentStatus = selectedCloud === "aws" ? awsStatus : selectedCloud === "azure" ? azureStatus : gcpStatus;
+  const cloudLogo = selectedCloud === "aws" ? "/logos/aws.svg" : selectedCloud === "azure" ? "/logos/azure.svg" : "/logos/gcp.svg";
 
   const audit = scanResults?.audit;
   const healthScore = audit?.health_score ?? 0;
@@ -129,39 +202,54 @@ export default function MonitoringView({ onNavigate }) {
     return colors[severity] || "#6b7280";
   };
 
-  // ── Not Connected State — redirect to Connect tab ────────────────────
-  if (!awsStatus?.connected) {
-    return (
-      <div className="animate-fade-in">
-        <div className="page-header">
-          <h2>Monitoring</h2>
-          <p>Real-time AWS infrastructure monitoring and CIS compliance scanning.</p>
-        </div>
-
-        <div className="glass-card" style={{ maxWidth: 550, margin: "40px auto", padding: 48, textAlign: "center" }}>
-          <div style={{ width: 80, height: 80, borderRadius: 20, background: "linear-gradient(135deg, #ff9900, #ff6600)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 24px" }}>
-            <Icon name="aws" size={48} />
-          </div>
-          <h3 style={{ fontSize: 22, marginBottom: 8 }}>AWS Not Connected</h3>
-          <p style={{ color: "var(--text-secondary)", maxWidth: 400, margin: "0 auto 24px" }}>
-            Connect your AWS account first to enable live infrastructure monitoring. Go to the Connect tab and enter your AWS Access Keys.
-          </p>
-          <button className="save-btn" onClick={() => onNavigate && onNavigate("connect")} style={{ padding: "12px 32px", fontSize: 15, display: "inline-flex", alignItems: "center", gap: 8 }}>
-            <Icon name="cloud-plus" size={18} /> Go to Connect
-          </button>
-        </div>
-      </div>
-    );
-  }
-
   // ── Connected State — Dashboard ────────────────────────────────────────
   return (
     <div className="animate-fade-in">
+      {/* Cloud Provider Selector */}
+      <div style={{ display: "flex", gap: 12, marginBottom: 24, padding: "8px 0", borderBottom: "1px solid var(--border-color)" }}>
+        {[
+          { id: "aws", name: "AWS", logo: "/logos/aws.svg" },
+          { id: "azure", name: "Azure", logo: "/logos/azure.svg" },
+          { id: "gcp", name: "GCP", logo: "/logos/gcp.svg" }
+        ].map(cloud => {
+          const isConnected = isCloudConnected(cloud.id);
+          const isActive = selectedCloud === cloud.id;
+          return (
+            <button
+              key={cloud.id}
+              onClick={() => isConnected && setSelectedCloud(cloud.id)}
+              disabled={!isConnected}
+              style={{
+                display: "flex", alignItems: "center", gap: 10, padding: "10px 20px", borderRadius: 12,
+                background: isActive ? "var(--bg-tertiary)" : "transparent",
+                border: isActive ? "1px solid var(--accent-primary)" : "1px solid transparent",
+                opacity: isConnected ? 1 : 0.4,
+                cursor: isConnected ? "pointer" : "not-allowed",
+                transition: "all 0.2s ease"
+              }}
+            >
+              <img src={cloud.logo} alt={cloud.name} style={{ width: 24, height: 24 }} />
+              <span style={{ fontWeight: 600, color: isActive ? "var(--text-primary)" : "var(--text-secondary)" }}>{cloud.name}</span>
+              {isConnected && !isActive && <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#22c55e" }}></div>}
+            </button>
+          );
+        })}
+      </div>
+
       <div className="page-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
         <div>
-          <h2>Monitoring</h2>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 4 }}>
+            <img src={cloudLogo} alt={selectedCloud} style={{ width: 32, height: 32 }} />
+            <h2 style={{ margin: 0 }}>{selectedCloud.toUpperCase()} Monitoring</h2>
+          </div>
           <p>
-            Connected to AWS ({awsStatus.region || "us-east-1"}) as {awsStatus.user || "unknown"}
+            {selectedCloud === "aws" ? (
+              `Connected to AWS (${currentStatus?.region || "us-east-1"}) as ${currentStatus?.user || "unknown"}`
+            ) : selectedCloud === "azure" ? (
+              `Connected to Azure (Tenant: ${currentStatus?.tenant_id || "unknown"})`
+            ) : (
+              `Connected to GCP (Project: ${currentStatus?.project_id || "unknown"})`
+            )}
             <span style={{ color: "#22c55e", marginLeft: 8 }}>● Connected</span>
           </p>
         </div>
@@ -224,18 +312,18 @@ export default function MonitoringView({ onNavigate }) {
             {/* Resource Stats */}
             <div className="glass-card stat-card stat-blue animate-slide-in stagger-1">
               <div className="stat-card-top"><div className="stat-icon"><Icon name="folder" size={22} /></div></div>
-              <div className="stat-value">{scanResults.scan?.s3_buckets || 0}</div>
-              <div className="stat-label">S3 Buckets</div>
+              <div className="stat-value">{scanResults.scan?.s3_buckets || scanResults.scan?.storage_accounts || 0}</div>
+              <div className="stat-label">{selectedCloud === "aws" ? "S3 Buckets" : selectedCloud === "azure" ? "Storage Accounts" : "Cloud Storage"}</div>
             </div>
             <div className="glass-card stat-card stat-purple animate-slide-in stagger-2">
               <div className="stat-card-top"><div className="stat-icon"><Icon name="shield" size={22} /></div></div>
-              <div className="stat-value">{scanResults.scan?.security_groups || 0}</div>
+              <div className="stat-value">{scanResults.scan?.security_groups || scanResults.scan?.network_sg || 0}</div>
               <div className="stat-label">Security Groups</div>
             </div>
             <div className="glass-card stat-card stat-amber animate-slide-in stagger-3">
               <div className="stat-card-top"><div className="stat-icon"><Icon name="users" size={22} /></div></div>
-              <div className="stat-value">{(scanResults.scan?.iam_policies || 0) + (scanResults.scan?.iam_users || 0)}</div>
-              <div className="stat-label">IAM Resources</div>
+              <div className="stat-value">{(scanResults.scan?.iam_policies || 0) + (scanResults.scan?.iam_users || 0) + (scanResults.scan?.identities || 0)}</div>
+              <div className="stat-label">IAM & Identities</div>
             </div>
           </div>
 
@@ -310,7 +398,7 @@ export default function MonitoringView({ onNavigate }) {
                                   color: isFail ? "#ef4444" : "#22c55e",
                                 }}>{f.status}</span>
                                 <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, color: "var(--text-muted)" }}>
-                                  <Icon name="aws" size={12} /> AWS
+                                  <img src={cloudLogo} alt="" style={{ width: 12, height: 12 }} /> {selectedCloud.toUpperCase()}
                                 </span>
                               </div>
                               <p style={{ fontSize: 13, fontWeight: 600 }}>{f.title}</p>
@@ -332,11 +420,11 @@ export default function MonitoringView({ onNavigate }) {
                                 </div>
                                 <div style={{ fontSize: 12 }}>
                                   <span style={{ color: "var(--text-muted)" }}>Type: </span>
-                                  <span style={{ color: "var(--text-secondary)" }}>{f.resource_type?.replace("aws_", "").replace(/_/g, " ")}</span>
+                                  <span style={{ color: "var(--text-secondary)" }}>{f.resource_type?.replace(`${selectedCloud}_`, "").replace(/_/g, " ")}</span>
                                 </div>
                                 <div style={{ fontSize: 12 }}>
                                   <span style={{ color: "var(--text-muted)" }}>Provider: </span>
-                                  <span style={{ color: "var(--text-secondary)" }}>AWS</span>
+                                  <span style={{ color: "var(--text-secondary)" }}>{selectedCloud.toUpperCase()}</span>
                                 </div>
                               </div>
 
@@ -413,56 +501,58 @@ export default function MonitoringView({ onNavigate }) {
             </div>
           </div>
 
-          {/* ── CloudTrail Event Feed ── */}
-          <div className="glass-card">
-            <div className="card-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <h3><Icon name="clock" size={18} style={{ marginRight: 8, verticalAlign: "middle" }} /> CloudTrail Event Feed</h3>
-              <button onClick={fetchEvents} style={{
-                padding: "4px 14px", borderRadius: 6, fontSize: 12, fontWeight: 500,
-                background: "var(--bg-tertiary)", color: "var(--text-secondary)",
-                border: "none", cursor: "pointer",
-              }}>
-                <Icon name="refresh" size={12} /> Refresh
-              </button>
-            </div>
-            <div className="card-body" ref={feedRef} style={{ maxHeight: 300, overflowY: "auto" }}>
-              {events.length === 0 ? (
-                <p style={{ textAlign: "center", color: "var(--text-secondary)", padding: 24 }}>
-                  {scanResults ? "No CloudTrail events found in the last 24 hours." : "Run a scan to load events."}
-                </p>
-              ) : (
-                events.map((evt, i) => (
-                  <div key={i}
-                    style={{
-                      padding: "10px 14px", borderBottom: "1px solid var(--border-color)",
-                      display: "flex", alignItems: "center", gap: 10,
-                      background: evt.status === "FAIL" ? "rgba(239, 68, 68, 0.03)" : evt.status === "WARN" ? "rgba(234, 179, 8, 0.03)" : "transparent",
-                    }}>
-                    <div style={{
-                      width: 8, height: 8, borderRadius: "50%", flexShrink: 0,
-                      background: evt.status === "FAIL" ? "#ef4444" : evt.status === "WARN" ? "#eab308" : "#22c55e",
-                    }}></div>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 13, fontWeight: 500 }}>
-                        {evt.event_name}
-                        {evt.alert && (
-                          <span style={{ fontSize: 11, color: getSeverityColor(evt.severity), marginLeft: 8 }}>
-                            {evt.alert}
-                          </span>
-                        )}
+          {/* ── Cloud Events Feed (AWS Only for now) ── */}
+          {selectedCloud === "aws" && (
+            <div className="glass-card">
+              <div className="card-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <h3><Icon name="clock" size={18} style={{ marginRight: 8, verticalAlign: "middle" }} /> CloudTrail Event Feed</h3>
+                <button onClick={fetchEvents} style={{
+                  padding: "4px 14px", borderRadius: 6, fontSize: 12, fontWeight: 500,
+                  background: "var(--bg-tertiary)", color: "var(--text-secondary)",
+                  border: "none", cursor: "pointer",
+                }}>
+                  <Icon name="refresh" size={12} /> Refresh
+                </button>
+              </div>
+              <div className="card-body" ref={feedRef} style={{ maxHeight: 300, overflowY: "auto" }}>
+                {events.length === 0 ? (
+                  <p style={{ textAlign: "center", color: "var(--text-secondary)", padding: 24 }}>
+                    {scanResults ? "No CloudTrail events found in the last 24 hours." : "Run a scan to load events."}
+                  </p>
+                ) : (
+                  events.map((evt, i) => (
+                    <div key={i}
+                      style={{
+                        padding: "10px 14px", borderBottom: "1px solid var(--border-color)",
+                        display: "flex", alignItems: "center", gap: 10,
+                        background: evt.status === "FAIL" ? "rgba(239, 68, 68, 0.03)" : evt.status === "WARN" ? "rgba(234, 179, 8, 0.03)" : "transparent",
+                      }}>
+                      <div style={{
+                        width: 8, height: 8, borderRadius: "50%", flexShrink: 0,
+                        background: evt.status === "FAIL" ? "#ef4444" : evt.status === "WARN" ? "#eab308" : "#22c55e",
+                      }}></div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 13, fontWeight: 500 }}>
+                          {evt.event_name}
+                          {evt.alert && (
+                            <span style={{ fontSize: 11, color: getSeverityColor(evt.severity), marginLeft: 8 }}>
+                              {evt.alert}
+                            </span>
+                          )}
+                        </div>
+                        <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
+                          {evt.event_source} | {evt.username} | {evt.source_ip || "N/A"}
+                        </div>
                       </div>
-                      <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
-                        {evt.event_source} | {evt.username} | {evt.source_ip || "N/A"}
+                      <div style={{ fontSize: 11, color: "var(--text-secondary)", whiteSpace: "nowrap" }}>
+                        {evt.event_time ? new Date(evt.event_time).toLocaleTimeString() : ""}
                       </div>
                     </div>
-                    <div style={{ fontSize: 11, color: "var(--text-secondary)", whiteSpace: "nowrap" }}>
-                      {evt.event_time ? new Date(evt.event_time).toLocaleTimeString() : ""}
-                    </div>
-                  </div>
-                ))
-              )}
+                  ))
+                )}
+              </div>
             </div>
-          </div>
+          )}
         </>
       )}
 
@@ -479,8 +569,8 @@ export default function MonitoringView({ onNavigate }) {
           </div>
           <h3>Ready to Scan</h3>
           <p style={{ color: "var(--text-secondary)", maxWidth: 400, margin: "0 auto" }}>
-            Click "Run Live Scan" to analyze your AWS infrastructure against CIS Benchmarks.
-            This will check S3 buckets, security groups, IAM policies, users, and CloudTrail events.
+            Click "Run Live Scan" to analyze your {selectedCloud.toUpperCase()} infrastructure against CIS Benchmarks.
+            This will check {selectedCloud === "aws" ? "S3 buckets, security groups, IAM policies, and CloudTrail events." : "storage, network security groups, and identity configurations."}
           </p>
         </div>
       )}

@@ -27,6 +27,8 @@ load_dotenv()
 _DATA_DIR = Path(__file__).parent / ".data"
 _DATA_DIR.mkdir(exist_ok=True)
 _AWS_CREDS_FILE = _DATA_DIR / "aws_credentials.json"
+_AZURE_CREDS_FILE = _DATA_DIR / "azure_credentials.json"
+_GCP_CREDS_FILE = _DATA_DIR / "gcp_credentials.json"
 _AWS_SCAN_CACHE_FILE = _DATA_DIR / "aws_scan_cache.json"
 
 from fastapi import FastAPI, HTTPException, Query
@@ -77,6 +79,8 @@ def startup():
     global _aws_scan_cache
     init_db()
     _load_aws_credentials()
+    _load_azure_credentials()
+    _load_gcp_credentials()
     _aws_scan_cache = _load_scan_cache()
 
 
@@ -99,6 +103,18 @@ class ScanResponse(BaseModel):
 
 class GitHubConnectRequest(BaseModel):
     url: str
+
+
+class AzureCredentialsRequest(BaseModel):
+    tenant_id: str
+    client_id: str
+    client_secret: str
+    subscription_id: str
+
+
+class GCPCredentialsRequest(BaseModel):
+    project_id: str
+    service_account_json: str  # This would normally be the content of the JSON key file
 
 
 # ─── Endpoints ────────────────────────────────────────────────────────────────
@@ -471,6 +487,47 @@ def _delete_aws_credentials():
     os.environ.pop("AWS_SECRET_ACCESS_KEY", None)
     os.environ.pop("AWS_DEFAULT_REGION", None)
 
+def _save_azure_credentials(creds: dict):
+    _AZURE_CREDS_FILE.write_text(json.dumps(creds))
+
+def _load_azure_credentials():
+    if _AZURE_CREDS_FILE.exists():
+        try:
+            creds = json.loads(_AZURE_CREDS_FILE.read_text())
+            os.environ["AZURE_TENANT_ID"] = creds.get("tenant_id", "")
+            os.environ["AZURE_CLIENT_ID"] = creds.get("client_id", "")
+            os.environ["AZURE_CLIENT_SECRET"] = creds.get("client_secret", "")
+            os.environ["AZURE_SUBSCRIPTION_ID"] = creds.get("subscription_id", "")
+            return True
+        except Exception: pass
+    return False
+
+def _delete_azure_credentials():
+    if _AZURE_CREDS_FILE.exists():
+        _AZURE_CREDS_FILE.unlink()
+    os.environ.pop("AZURE_TENANT_ID", None)
+    os.environ.pop("AZURE_CLIENT_ID", None)
+    os.environ.pop("AZURE_CLIENT_SECRET", None)
+    os.environ.pop("AZURE_SUBSCRIPTION_ID", None)
+
+def _save_gcp_credentials(creds: dict):
+    _GCP_CREDS_FILE.write_text(json.dumps(creds))
+
+def _load_gcp_credentials():
+    if _GCP_CREDS_FILE.exists():
+        try:
+            creds = json.loads(_GCP_CREDS_FILE.read_text())
+            os.environ["GOOGLE_CLOUD_PROJECT"] = creds.get("project_id", "")
+            # In a real app, you'd handle the service account JSON file path here
+            return True
+        except Exception: pass
+    return False
+
+def _delete_gcp_credentials():
+    if _GCP_CREDS_FILE.exists():
+        _GCP_CREDS_FILE.unlink()
+    os.environ.pop("GOOGLE_CLOUD_PROJECT", None)
+
 
 def _save_scan_cache(data: dict):
     """Persist scan results to disk."""
@@ -525,14 +582,60 @@ def configure_aws(creds: AWSCredentialsRequest):
     return {"status": "connected", **result}
 
 
-@app.post("/api/aws/disconnect")
-def disconnect_aws():
-    """Disconnect AWS account — removes persisted credentials."""
-    global _aws_scan_cache
-    _delete_aws_credentials()
-    _aws_scan_cache = {}
-    if _AWS_SCAN_CACHE_FILE.exists():
-        _AWS_SCAN_CACHE_FILE.unlink()
+    return {"status": "disconnected"}
+
+
+# ── Azure Endpoints ───────────────────────────────────────────────────────
+
+@app.get("/api/azure/status")
+def azure_connection_status():
+    if not os.getenv("AZURE_CLIENT_ID"):
+        return {"connected": False}
+    return {
+        "connected": True,
+        "tenant_id": os.getenv("AZURE_TENANT_ID", "")[:8] + "...",
+        "subscription_id": os.getenv("AZURE_SUBSCRIPTION_ID", "")[:8] + "...",
+        "region": "Global (Azure)"
+    }
+
+@app.post("/api/azure/configure")
+def configure_azure(creds: AzureCredentialsRequest):
+    os.environ["AZURE_TENANT_ID"] = creds.tenant_id.strip()
+    os.environ["AZURE_CLIENT_ID"] = creds.client_id.strip()
+    os.environ["AZURE_CLIENT_SECRET"] = creds.client_secret.strip()
+    os.environ["AZURE_SUBSCRIPTION_ID"] = creds.subscription_id.strip()
+    # In a real app, we would test connection here
+    _save_azure_credentials(creds.dict())
+    return {"status": "connected", "connected": True, "tenant_id": creds.tenant_id[:8] + "..."}
+
+@app.post("/api/azure/disconnect")
+def disconnect_azure():
+    _delete_azure_credentials()
+    return {"status": "disconnected"}
+
+
+# ── GCP Endpoints ─────────────────────────────────────────────────────────
+
+@app.get("/api/gcp/status")
+def gcp_connection_status():
+    if not os.getenv("GOOGLE_CLOUD_PROJECT"):
+        return {"connected": False}
+    return {
+        "connected": True,
+        "project_id": os.getenv("GOOGLE_CLOUD_PROJECT", ""),
+        "user_identity": "Service Account (GCP)"
+    }
+
+@app.post("/api/gcp/configure")
+def configure_gcp(creds: GCPCredentialsRequest):
+    os.environ["GOOGLE_CLOUD_PROJECT"] = creds.project_id.strip()
+    # In a real app, we would write the JSON to a file and set GOOGLE_APPLICATION_CREDENTIALS
+    _save_gcp_credentials(creds.dict())
+    return {"status": "connected", "connected": True, "project_id": creds.project_id}
+
+@app.post("/api/gcp/disconnect")
+def disconnect_gcp():
+    _delete_gcp_credentials()
     return {"status": "disconnected"}
 
 

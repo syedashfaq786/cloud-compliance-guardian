@@ -31,15 +31,35 @@ export default function ConnectView() {
   const [awsError, setAwsError] = useState("");
   const [showSecret, setShowSecret] = useState(false);
 
+  // Azure state
+  const [azureStatus, setAzureStatus] = useState(null);
+  const [showAzureConfig, setShowAzureConfig] = useState(false);
+  const [azureTenantId, setAzureTenantId] = useState("");
+  const [azureClientId, setAzureClientId] = useState("");
+  const [azureClientSecret, setAzureClientSecret] = useState("");
+  const [azureSubscriptionId, setAzureSubscriptionId] = useState("");
+  const [azureConfiguring, setAzureConfiguring] = useState(false);
+  const [azureError, setAzureError] = useState("");
+
+  // GCP state
+  const [gcpStatus, setGcpStatus] = useState(null);
+  const [showGcpConfig, setShowGcpConfig] = useState(false);
+  const [gcpProjectId, setGcpProjectId] = useState("");
+  const [gcpServiceAccountJson, setGcpServiceAccountJson] = useState("");
+  const [gcpConfiguring, setGcpConfiguring] = useState(false);
+  const [gcpError, setGcpError] = useState("");
+
   const providers = [
     { id: "aws", name: "AWS", description: "Amazon Web Services", logo: "/logos/aws.svg", icon: "aws", connectable: true },
-    { id: "azure", name: "Azure", description: "Microsoft Azure", logo: "/logos/azure.svg", icon: "azure", connectable: false },
-    { id: "gcp", name: "GCP", description: "Google Cloud Platform", logo: "/logos/gcp.svg", icon: "gcp", connectable: false },
+    { id: "azure", name: "Azure", description: "Microsoft Azure", logo: "/logos/azure.svg", icon: "azure", connectable: true },
+    { id: "gcp", name: "GCP", description: "Google Cloud Platform", logo: "/logos/gcp.svg", icon: "gcp", connectable: true },
   ];
 
   useEffect(() => {
     fetchConnectedRepo();
     checkAwsStatus();
+    checkAzureStatus();
+    checkGcpStatus();
   }, []);
 
   // ── AWS Functions ──────────────────────────────────────────────────────
@@ -87,6 +107,92 @@ export default function ConnectView() {
     try {
       await fetch(`${API}/api/aws/disconnect`, { method: "POST" });
       setAwsStatus({ connected: false });
+    } catch {}
+  };
+
+  // ── Azure Functions ───────────────────────────────────────────────────
+
+  const checkAzureStatus = async () => {
+    try {
+      const res = await fetch(`${API}/api/azure/status`);
+      const data = await res.json();
+      setAzureStatus(data);
+    } catch { setAzureStatus({ connected: false }); }
+  };
+
+  const handleAzureConfigure = async () => {
+    if (!azureTenantId.trim() || !azureClientId.trim() || !azureClientSecret.trim() || !azureSubscriptionId.trim()) {
+      setAzureError("All Azure fields are required");
+      return;
+    }
+    setAzureConfiguring(true);
+    setAzureError("");
+    try {
+      const res = await fetch(`${API}/api/azure/configure`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          tenant_id: azureTenantId.trim(),
+          client_id: azureClientId.trim(),
+          client_secret: azureClientSecret.trim(),
+          subscription_id: azureSubscriptionId.trim()
+        }),
+      });
+      const data = await res.json();
+      if (data.status === "connected") {
+        setAzureStatus({ connected: true, ...data });
+        setShowAzureConfig(false);
+      } else { setAzureError(data.message || "Failed to connect"); }
+    } catch { setAzureError("Failed to connect to Azure"); }
+    finally { setAzureConfiguring(false); }
+  };
+
+  const handleAzureDisconnect = async () => {
+    try {
+      await fetch(`${API}/api/azure/disconnect`, { method: "POST" });
+      setAzureStatus({ connected: false });
+    } catch {}
+  };
+
+  // ── GCP Functions ─────────────────────────────────────────────────────
+
+  const checkGcpStatus = async () => {
+    try {
+      const res = await fetch(`${API}/api/gcp/status`);
+      const data = await res.json();
+      setGcpStatus(data);
+    } catch { setGcpStatus({ connected: false }); }
+  };
+
+  const handleGcpConfigure = async () => {
+    if (!gcpProjectId.trim() || !gcpServiceAccountJson.trim()) {
+      setGcpError("Project ID and Service Account JSON are required");
+      return;
+    }
+    setGcpConfiguring(true);
+    setGcpError("");
+    try {
+      const res = await fetch(`${API}/api/gcp/configure`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project_id: gcpProjectId.trim(),
+          service_account_json: gcpServiceAccountJson.trim()
+        }),
+      });
+      const data = await res.json();
+      if (data.status === "connected") {
+        setGcpStatus({ connected: true, ...data });
+        setShowGcpConfig(false);
+      } else { setGcpError(data.message || "Failed to connect"); }
+    } catch { setGcpError("Failed to connect to GCP"); }
+    finally { setGcpConfiguring(false); }
+  };
+
+  const handleGcpDisconnect = async () => {
+    try {
+      await fetch(`${API}/api/gcp/disconnect`, { method: "POST" });
+      setGcpStatus({ connected: false });
     } catch {}
   };
 
@@ -226,14 +332,22 @@ export default function ConnectView() {
             return (
               <div
                 key={p.id}
-                className={`provider-card ${selectedProvider === p.id ? "active" : ""} ${isAwsConnected ? "active" : ""}`}
+                className={`provider-card ${selectedProvider === p.id ? "active" : ""} ${
+                  (p.id === "aws" && awsStatus?.connected) ||
+                  (p.id === "azure" && azureStatus?.connected) ||
+                  (p.id === "gcp" && gcpStatus?.connected) ? "active" : ""
+                }`}
                 onClick={() => {
                   setSelectedProvider(p.id);
-                  if (isAws && !awsStatus?.connected) setShowAwsConfig(true);
+                  if (p.id === "aws" && !awsStatus?.connected) setShowAwsConfig(true);
+                  if (p.id === "azure" && !azureStatus?.connected) setShowAzureConfig(true);
+                  if (p.id === "gcp" && !gcpStatus?.connected) setShowGcpConfig(true);
                 }}
                 style={{ position: "relative" }}
               >
-                {isAwsConnected && (
+                {((p.id === "aws" && awsStatus?.connected) ||
+                  (p.id === "azure" && azureStatus?.connected) ||
+                  (p.id === "gcp" && gcpStatus?.connected)) && (
                   <div style={{ position: "absolute", top: 10, right: 10, width: 24, height: 24, borderRadius: "50%", background: "rgba(34,197,94,0.15)", display: "flex", alignItems: "center", justifyContent: "center" }}>
                     <Icon name="circle-check" size={14} />
                   </div>
@@ -243,21 +357,38 @@ export default function ConnectView() {
                 </div>
                 <h4>{p.name}</h4>
                 <p>{p.description}</p>
-                {isAws && (
-                  <span style={{ fontSize: 11, marginTop: 4, color: isAwsConnected ? "#22c55e" : "var(--accent-primary)", fontWeight: 600 }}>
-                    {isAwsConnected ? `Connected (${awsStatus.region || "us-east-1"})` : "Click to connect"}
-                  </span>
+                
+                {p.id === "aws" && (
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: "100%" }}>
+                    <span style={{ fontSize: 11, marginTop: 4, color: awsStatus?.connected ? "#22c55e" : "var(--accent-primary)", fontWeight: 600 }}>
+                      {awsStatus?.connected ? `Connected (${awsStatus.region || "us-east-1"})` : "Click to connect"}
+                    </span>
+                    {awsStatus?.connected && (
+                      <button onClick={(e) => { e.stopPropagation(); handleAwsDisconnect(); }} style={{ marginTop: 6, padding: "4px 12px", fontSize: 11, background: "rgba(220,53,69,0.1)", color: "#dc3545", border: "1px solid rgba(220,53,69,0.3)", borderRadius: 6, cursor: "pointer", fontWeight: 500 }}>Disconnect</button>
+                    )}
+                  </div>
                 )}
-                {isAwsConnected && (
-                  <button
-                    onClick={(e) => { e.stopPropagation(); handleAwsDisconnect(); }}
-                    style={{ marginTop: 6, padding: "4px 12px", fontSize: 11, background: "rgba(220,53,69,0.1)", color: "#dc3545", border: "1px solid rgba(220,53,69,0.3)", borderRadius: 6, cursor: "pointer", fontWeight: 500 }}
-                  >
-                    Disconnect
-                  </button>
+
+                {p.id === "azure" && (
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: "100%" }}>
+                    <span style={{ fontSize: 11, marginTop: 4, color: azureStatus?.connected ? "#22c55e" : "var(--accent-primary)", fontWeight: 600 }}>
+                      {azureStatus?.connected ? `Connected (${azureStatus.tenant_id})` : "Click to connect"}
+                    </span>
+                    {azureStatus?.connected && (
+                      <button onClick={(e) => { e.stopPropagation(); handleAzureDisconnect(); }} style={{ marginTop: 6, padding: "4px 12px", fontSize: 11, background: "rgba(220,53,69,0.1)", color: "#dc3545", border: "1px solid rgba(220,53,69,0.3)", borderRadius: 6, cursor: "pointer", fontWeight: 500 }}>Disconnect</button>
+                    )}
+                  </div>
                 )}
-                {!isAws && (
-                  <span style={{ fontSize: 11, marginTop: 4, color: "var(--text-muted)" }}>Coming soon</span>
+
+                {p.id === "gcp" && (
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: "100%" }}>
+                    <span style={{ fontSize: 11, marginTop: 4, color: gcpStatus?.connected ? "#22c55e" : "var(--accent-primary)", fontWeight: 600 }}>
+                      {gcpStatus?.connected ? `Connected (${gcpStatus.project_id})` : "Click to connect"}
+                    </span>
+                    {gcpStatus?.connected && (
+                      <button onClick={(e) => { e.stopPropagation(); handleGcpDisconnect(); }} style={{ marginTop: 6, padding: "4px 12px", fontSize: 11, background: "rgba(220,53,69,0.1)", color: "#dc3545", border: "1px solid rgba(220,53,69,0.3)", borderRadius: 6, cursor: "pointer", fontWeight: 500 }}>Disconnect</button>
+                    )}
+                  </div>
                 )}
               </div>
             );
@@ -322,7 +453,7 @@ export default function ConnectView() {
 
       {/* ── AWS Config Modal ── */}
       {showAwsConfig && (
-        <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, backdropFilter: "blur(4px)" }}
+        <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(10, 15, 25, 0.92)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, backdropFilter: "blur(8px)" }}
           onClick={() => { setShowAwsConfig(false); setAwsError(""); }}>
           <div className="glass-card animate-fade-in" style={{ width: 500, padding: 32, cursor: "default" }} onClick={(e) => e.stopPropagation()}>
             <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 24 }}>
@@ -384,9 +515,87 @@ export default function ConnectView() {
         </div>
       )}
 
+      {/* ── Azure Config Modal ── */}
+      {showAzureConfig && (
+        <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(10, 15, 25, 0.92)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, backdropFilter: "blur(8px)" }}
+          onClick={() => { setShowAzureConfig(false); setAzureError(""); }}>
+          <div className="glass-card animate-fade-in" style={{ width: 500, padding: 32, cursor: "default" }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 24 }}>
+              <div style={{ width: 48, height: 48, borderRadius: 12, background: "linear-gradient(135deg, #0078d4, #005a9e)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <Icon name="azure" size={28} />
+              </div>
+              <div>
+                <h3 style={{ margin: 0, fontSize: 18 }}>Connect Azure Account</h3>
+                <p style={{ margin: 0, fontSize: 13, color: "var(--text-secondary)" }}>Enter your service principal credentials</p>
+              </div>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ display: "block", fontSize: 13, fontWeight: 500, marginBottom: 6, color: "var(--text-secondary)" }}>Tenant ID</label>
+                <input type="text" value={azureTenantId} onChange={(e) => setAzureTenantId(e.target.value)} placeholder="00000000-0000..." style={{ width: "100%", padding: "10px 14px", borderRadius: 8, border: "1px solid var(--border-color)", background: "var(--bg-secondary)", color: "var(--text-primary)", fontSize: 14, outline: "none", boxSizing: "border-box" }} />
+              </div>
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ display: "block", fontSize: 13, fontWeight: 500, marginBottom: 6, color: "var(--text-secondary)" }}>Client ID</label>
+                <input type="text" value={azureClientId} onChange={(e) => setAzureClientId(e.target.value)} placeholder="00000000-0000..." style={{ width: "100%", padding: "10px 14px", borderRadius: 8, border: "1px solid var(--border-color)", background: "var(--bg-secondary)", color: "var(--text-primary)", fontSize: 14, outline: "none", boxSizing: "border-box" }} />
+              </div>
+            </div>
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ display: "block", fontSize: 13, fontWeight: 500, marginBottom: 6, color: "var(--text-secondary)" }}>Client Secret</label>
+              <input type="password" value={azureClientSecret} onChange={(e) => setAzureClientSecret(e.target.value)} placeholder="••••••••••••••••" style={{ width: "100%", padding: "10px 14px", borderRadius: 8, border: "1px solid var(--border-color)", background: "var(--bg-secondary)", color: "var(--text-primary)", fontSize: 14, outline: "none", boxSizing: "border-box" }} />
+            </div>
+            <div style={{ marginBottom: 20 }}>
+              <label style={{ display: "block", fontSize: 13, fontWeight: 500, marginBottom: 6, color: "var(--text-secondary)" }}>Subscription ID</label>
+              <input type="text" value={azureSubscriptionId} onChange={(e) => setAzureSubscriptionId(e.target.value)} placeholder="00000000-0000..." style={{ width: "100%", padding: "10px 14px", borderRadius: 8, border: "1px solid var(--border-color)", background: "var(--bg-secondary)", color: "var(--text-primary)", fontSize: 14, outline: "none", boxSizing: "border-box" }} />
+            </div>
+
+            {azureError && <p style={{ color: "#ef4444", fontSize: 13, marginBottom: 12 }}>{azureError}</p>}
+
+            <div style={{ display: "flex", gap: 12, justifyContent: "flex-end" }}>
+              <button className="connect-btn" onClick={() => setShowAzureConfig(false)} style={{ background: "var(--bg-tertiary)", color: "var(--text-primary)", border: "1px solid var(--border-color)" }}>Cancel</button>
+              <button className="save-btn" onClick={handleAzureConfigure} disabled={azureConfiguring}>{azureConfiguring ? "Connecting..." : "Connect Azure"}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── GCP Config Modal ── */}
+      {showGcpConfig && (
+        <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(10, 15, 25, 0.92)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, backdropFilter: "blur(8px)" }}
+          onClick={() => { setShowGcpConfig(false); setGcpError(""); }}>
+          <div className="glass-card animate-fade-in" style={{ width: 500, padding: 32, cursor: "default" }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 24 }}>
+              <div style={{ width: 48, height: 48, borderRadius: 12, background: "linear-gradient(135deg, #4285f4, #34a853)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <Icon name="gcp" size={28} />
+              </div>
+              <div>
+                <h3 style={{ margin: 0, fontSize: 18 }}>Connect GCP Project</h3>
+                <p style={{ margin: 0, fontSize: 13, color: "var(--text-secondary)" }}>Enter your project details and service account</p>
+              </div>
+            </div>
+
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ display: "block", fontSize: 13, fontWeight: 500, marginBottom: 6, color: "var(--text-secondary)" }}>Project ID</label>
+              <input type="text" value={gcpProjectId} onChange={(e) => setGcpProjectId(e.target.value)} placeholder="my-awesome-project-123" style={{ width: "100%", padding: "10px 14px", borderRadius: 8, border: "1px solid var(--border-color)", background: "var(--bg-secondary)", color: "var(--text-primary)", fontSize: 14, outline: "none", boxSizing: "border-box" }} />
+            </div>
+            <div style={{ marginBottom: 20 }}>
+              <label style={{ display: "block", fontSize: 13, fontWeight: 500, marginBottom: 6, color: "var(--text-secondary)" }}>Service Account Key (JSON)</label>
+              <textarea value={gcpServiceAccountJson} onChange={(e) => setGcpServiceAccountJson(e.target.value)} placeholder='{ "type": "service_account", ... }' style={{ width: "100%", height: 120, padding: "10px 14px", borderRadius: 8, border: "1px solid var(--border-color)", background: "var(--bg-secondary)", color: "var(--text-primary)", fontSize: 12, outline: "none", boxSizing: "border-box", fontFamily: "monospace", resize: "none" }} />
+            </div>
+
+            {gcpError && <p style={{ color: "#ef4444", fontSize: 13, marginBottom: 12 }}>{gcpError}</p>}
+
+            <div style={{ display: "flex", gap: 12, justifyContent: "flex-end" }}>
+              <button className="connect-btn" onClick={() => setShowGcpConfig(false)} style={{ background: "var(--bg-tertiary)", color: "var(--text-primary)", border: "1px solid var(--border-color)" }}>Cancel</button>
+              <button className="save-btn" onClick={handleGcpConfigure} disabled={gcpConfiguring}>{gcpConfiguring ? "Connecting..." : "Connect GCP"}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── GitHub Connect Modal ── */}
       {showGitHubModal && (
-        <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, backdropFilter: "blur(4px)" }}
+        <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(10, 15, 25, 0.92)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, backdropFilter: "blur(8px)" }}
           onClick={() => { setShowGitHubModal(false); setGithubError(""); }}>
           <div className="glass-card animate-fade-in" style={{ width: 480, padding: 32, cursor: "default" }} onClick={(e) => e.stopPropagation()}>
             <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 24 }}>
