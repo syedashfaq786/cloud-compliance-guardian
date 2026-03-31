@@ -1,0 +1,173 @@
+﻿git : remote: error: 
+GH013: Repository 
+rule violations 
+found for 
+refs/heads/main.     
+   
+At line:1 char:1
++ git push origin 
+main > 
+push_error.txt 2>&1 
+; cat push_error.txt
++ ~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~
+~~
+    + CategoryInfo   
+           : NotSpe  
+  cified: (remote:   
+  error: ...s/mai    
+n.        :Strin    
+g) [], RemoteExc    
+eption
+    + FullyQualified 
+   ErrorId : Native  
+  CommandError
+ 
+remote: 
+remote: - GITHUB 
+PUSH PROTECTION      
+  
+remote:   ΓÇöΓÇöΓÇöΓÇ
+öΓÇöΓÇöΓÇöΓÇöΓÇöΓÇöΓÇ
+öΓÇöΓÇöΓÇöΓÇöΓÇöΓÇöΓÇ
+öΓÇöΓÇöΓÇöΓÇöΓÇöΓÇöΓÇ
+öΓÇöΓÇöΓÇöΓÇöΓÇöΓÇöΓÇ
+öΓÇöΓÇöΓÇöΓÇöΓÇöΓÇöΓÇ
+öΓÇöΓÇö        
+remote:     Resolve 
+the following 
+violations before 
+pushing again        
+remote: 
+remote:     - Push 
+cannot contain 
+secrets        
+remote: 
+remote:             
+remote:      (?) 
+Learn how to resolve 
+a blocked push       
+ 
+remote:      https://
+docs.github.com/code-
+security/secret-scann
+ing/working-with-secr
+et-scanning-and-push-
+protection/working-wi
+th-push-protection-fr
+om-the-command-line#r
+esolving-a-blocked-pu
+sh        
+remote:             
+remote:             
+remote:       ΓÇöΓÇö 
+Amazon AWS Access 
+Key ID ΓÇöΓÇöΓÇöΓÇöΓÇ
+öΓÇöΓÇöΓÇöΓÇöΓÇöΓÇöΓÇ
+öΓÇöΓÇöΓÇöΓÇöΓÇöΓÇöΓÇ
+öΓÇöΓÇöΓÇöΓÇöΓÇöΓÇöΓÇ
+ö        
+remote:        
+locations:        
+remote:          - 
+commit: 059c56d5c0486
+0670fc8ee831290b52892
+9a89d4        
+remote:            
+path: test_aws_invent
+ory.py:6        
+remote:          - 
+commit: 98bada3278f00
+014fe981c61262b56edd8
+cfc48f        
+remote:            
+path: 
+test_aws_org.py:6    
+    
+remote:          - 
+commit: 98bada3278f00
+014fe981c61262b56edd8
+cfc48f        
+remote:            
+path: test_org_scanne
+r.py:10        
+remote:             
+remote:        (?) 
+To push, remove 
+secret from 
+commit(s) or follow 
+this URL to allow 
+the secret.        
+remote:        https:
+//github.com/syedashf
+aq786/cloud-complianc
+e-guardian/security/s
+ecret-scanning/unbloc
+k-secret/3Bj1IsbQY6Iu
+fUgNSg5jFRlwb0U      
+  
+remote:             
+remote:             
+remote:       ΓÇöΓÇö 
+Amazon AWS Secret 
+Access Key ΓÇöΓÇöΓÇöΓ
+ÇöΓÇöΓÇöΓÇöΓÇöΓÇöΓÇöΓ
+ÇöΓÇöΓÇöΓÇöΓÇöΓÇöΓÇöΓ
+ÇöΓÇöΓÇöΓÇöΓÇö       
+ 
+remote:        
+locations:        
+remote:          - 
+commit: 059c56d5c0486
+0670fc8ee831290b52892
+9a89d4        
+remote:            
+path: test_aws_invent
+ory.py:7        
+remote:          - 
+commit: 98bada3278f00
+014fe981c61262b56edd8
+cfc48f        
+remote:            
+path: 
+test_aws_org.py:7    
+    
+remote:          - 
+commit: 98bada3278f00
+014fe981c61262b56edd8
+cfc48f        
+remote:            
+path: test_org_scanne
+r.py:11        
+remote:             
+remote:        (?) 
+To push, remove 
+secret from 
+commit(s) or follow 
+this URL to allow 
+the secret.        
+remote:        https:
+//github.com/syedashf
+aq786/cloud-complianc
+e-guardian/security/s
+ecret-scanning/unbloc
+k-secret/3Bj1ItiRWs6T
+ELPObzRLrEBwjMR      
+  
+remote:             
+remote: 
+remote: 
+To https://github.com
+/syedashfaq786/cloud-
+compliance-guardian.g
+it
+ ! [remote rejected] 
+main -> main (push 
+declined due to 
+repository rule 
+violations)
+error: failed to 
+push some refs to 'ht
+tps://github.com/syed
+ashfaq786/cloud-compl
+iance-guardian.git'

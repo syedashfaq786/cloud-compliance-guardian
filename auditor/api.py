@@ -1,0 +1,1089 @@
+"""
+FastAPI REST API — Serves audit data to the Security Dashboard.
+
+Endpoints:
+    GET  /api/audits          — List recent audits
+    GET  /api/audits/{id}     — Get audit details with findings
+    GET  /api/trends          — Get compliance trend data
+    GET  /api/drift           — Get active drift alerts
+    POST /api/scan            — Trigger a new audit
+    GET  /api/summary         — Get compliance summary
+    POST /api/drift/{id}/ack  — Acknowledge a drift alert
+"""
+
+import os
+import csv
+import io
+import json
+import threading
+from pathlib import Path
+from typing import Optional, List
+from datetime import datetime, timezone
+
+from dotenv import load_dotenv
+load_dotenv()
+
+# ─── Persistence Paths ───────────────────────────────────────────────────────
+_DATA_DIR = Path(__file__).parent / ".data"
+_DATA_DIR.mkdir(exist_ok=True)
+_AWS_CREDS_FILE = _DATA_DIR / "aws_credentials.json"
+_AZURE_CREDS_FILE = _DATA_DIR / "azure_credentials.json"
+_GCP_CREDS_FILE = _DATA_DIR / "gcp_credentials.json"
+_AWS_SCAN_CACHE_FILE = _DATA_DIR / "aws_scan_cache.json"
+_AZURE_SCAN_CACHE_FILE = _DATA_DIR / "azure_scan_cache.json"
+_GCP_SCAN_CACHE_FILE = _DATA_DIR / "gcp_scan_cache.json"
+
+import logging
+logger = logging.getLogger(__name__)
+
+_aws_scan_cache = {}
+_azure_scan_cache = None
+_gcp_scan_cache = None
+
+from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect, BackgroundTasks
+from fastapi.responses import StreamingResponse
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+
+from .database import (
+    init_db,
+    get_session,
+    get_recent_audits,
+    get_audit_by_id,
+    get_findings_by_audit,
+    get_trend_data,
+    get_active_drift_alerts,
+    acknowledge_alert,
+    get_compliance_summary,
+    save_github_repo,
+    get_connected_repo,
+    update_repo_sync_time,
+)
+from .audit import run_audit
+from .github import clone_repo, get_repo_metadata, sync_and_scan, get_repo_name_from_url
+from .aws_scanner import AWSScanner
+from .aws_auditor import audit_live_resources as audit_aws_resources
+from .azure_scanner import AzureScanner
+from .azure_auditor import audit_azure_resources
+from .gcp_scanner import GCPScanner
+from .gcp_auditor import audit_gcp_resources
+
+
+# ─── WebSocket Broadcast Manager ──────────────────────────────────────────────
+
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: List[WebSocket] = []
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+
+    def disconnect(self, websocket: WebSocket):
+        self.active_connections.remove(websocket)
+
+    async def broadcast(self, message: dict):
+        for connection in self.active_connections:
+            try:
+                await connection.send_json(message)
+            except Exception:
+                pass
+
+manager = ConnectionManager()
+
+
+# ─── App Setup ────────────────────────────────────────────────────────────────
+
+app = FastAPI(
+    title="Cloud-Compliance Guardian API",
+    description="CIS Benchmark compliance auditor powered by Cisco Sec-8B",
+    version="1.0.0",
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # In production, lock this down
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+@app.get("/api/aws/regions")
+def get_aws_regions():
+    """Get list of available AWS regions."""
+    try:
+        scanner = AWSScanner()
+        regions = scanner.get_available_regions()
+        return {"regions": regions, "primary": scanner.region}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.on_event("startup")
+def startup():
+    """Initialize the database and restore persisted state on startup."""
+    global _aws_scan_cache, _azure_scan_cache, _gcp_scan_cache
+    init_db()
+    _load_aws_credentials()
+    _load_azure_credentials()
+    _load_gcp_credentials()
+    _aws_scan_cache = _load_scan_cache("aws")
+    _azure_scan_cache = _load_scan_cache("azure")
+    _gcp_scan_cache = _load_scan_cache("gcp")
+
+
+# ─── Request/Response Models ─────────────────────────────────────────────────
+
+class ScanRequest(BaseModel):
+    directory: str
+    endpoint: Optional[str] = None
+    model: Optional[str] = None
+    backend: Optional[str] = None
+
+
+class ScanResponse(BaseModel):
+    audit_id: str
+    compliance_score: float
+    total_findings: int
+    severity_counts: dict
+    status: str
+
+
+class GitHubConnectRequest(BaseModel):
+    url: str
+
+
+class AWSScanRequest(BaseModel):
+    regions: Optional[List[str]] = ["all"]
+
+
+class AzureCredentialsRequest(BaseModel):
+    tenant_id: str
+    client_id: str
+    client_secret: str
+    subscription_id: str
+
+
+class GCPCredentialsRequest(BaseModel):
+    project_id: str
+    service_account_json: str  # This would normally be the content of the JSON key file
+
+
+# ─── Endpoints ────────────────────────────────────────────────────────────────
+
+@app.get("/api/health")
+def health_check():
+    return {"status": "healthy", "service": "compliance-guardian"}
+
+
+@app.get("/api/summary")
+def get_summary():
+    """Get overall compliance summary."""
+    session = get_session()
+    try:
+        return get_compliance_summary(session)
+    finally:
+        session.close()
+
+
+@app.get("/api/audits")
+def list_audits(limit: int = Query(20, ge=1, le=100)):
+    """List recent audits."""
+    session = get_session()
+    try:
+        audits = get_recent_audits(session, limit=limit)
+        return {"audits": [a.to_dict() for a in audits]}
+    finally:
+        session.close()
+
+
+@app.get("/api/audits/{audit_id}")
+def get_audit(audit_id: str):
+    """Get a specific audit with its findings and scanned file list."""
+    session = get_session()
+    try:
+        audit = get_audit_by_id(session, audit_id)
+        if not audit:
+            raise HTTPException(status_code=404, detail="Audit not found")
+
+        findings = get_findings_by_audit(session, audit.id)
+        findings_data = [f.to_dict() for f in findings]
+        result = audit.to_dict()
+        result["findings"] = findings_data
+
+        # Build scanned files list with status from findings
+        files_with_findings = {}
+        for f in findings_data:
+            fp = f.get("file_path", "")
+            if not fp:
+                continue
+            if fp not in files_with_findings:
+                files_with_findings[fp] = {"file": fp, "pass": 0, "fail": 0, "resources": set()}
+            files_with_findings[fp]["resources"].add(f.get("resource_address", ""))
+            if f.get("status") == "FAIL":
+                files_with_findings[fp]["fail"] += 1
+            else:
+                files_with_findings[fp]["pass"] += 1
+
+        # Try to also discover files with no findings by scanning directory
+        directory = audit.directory
+        try:
+            from pathlib import Path
+            dir_path = Path(directory)
+            if dir_path.exists() and dir_path.is_dir():
+                for tf_file in sorted(dir_path.rglob("*.tf")):
+                    rel = str(tf_file.relative_to(dir_path))
+                    if rel not in files_with_findings:
+                        files_with_findings[rel] = {"file": rel, "pass": 0, "fail": 0, "resources": set()}
+        except Exception:
+            pass
+
+        # Convert sets to lists for JSON serialization
+        scanned_files = []
+        for fp, info in sorted(files_with_findings.items()):
+            status = "clean" if info["fail"] == 0 else "issues"
+            scanned_files.append({
+                "file": fp,
+                "pass_count": info["pass"],
+                "fail_count": info["fail"],
+                "resources": list(info["resources"]),
+                "status": status,
+            })
+
+        result["scanned_files"] = scanned_files
+        return result
+    finally:
+        session.close()
+
+
+@app.get("/api/trends")
+def get_trends(days: int = Query(30, ge=1, le=365)):
+    """Get compliance trend data."""
+    session = get_session()
+    try:
+        snapshots = get_trend_data(session, days=days)
+        return {"trends": [s.to_dict() for s in snapshots]}
+    finally:
+        session.close()
+
+
+@app.get("/api/drift")
+def get_drift_alerts():
+    """Get active drift detection alerts."""
+    session = get_session()
+    try:
+        alerts = get_active_drift_alerts(session)
+        return {"alerts": [a.to_dict() for a in alerts]}
+    finally:
+        session.close()
+
+
+@app.post("/api/scan", response_model=ScanResponse)
+def trigger_scan(request: ScanRequest):
+    """Trigger a new compliance audit."""
+    try:
+        report = run_audit(
+            directory=request.directory,
+            endpoint=request.endpoint,
+            model=request.model,
+            backend=request.backend,
+            triggered_by="api",
+        )
+        return ScanResponse(
+            audit_id=report.audit_id,
+            compliance_score=report.compliance_score,
+            total_findings=report.total_findings,
+            severity_counts=report.severity_counts,
+            status=report.status,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/audits/{audit_id}/report")
+def download_audit_report(audit_id: str, format: str = Query("pdf", pattern="^(pdf|csv|json)$")):
+    """Download an audit report as PDF, CSV, or JSON."""
+    session = get_session()
+    try:
+        audit = get_audit_by_id(session, audit_id)
+        if not audit:
+            raise HTTPException(status_code=404, detail="Audit not found")
+
+        findings = get_findings_by_audit(session, audit.id)
+        audit_data = audit.to_dict()
+        findings_data = [f.to_dict() for f in findings]
+
+        if format == "pdf":
+            from .report_generator import generate_pdf_report
+            pdf_bytes = generate_pdf_report(audit_data, findings_data)
+            return StreamingResponse(
+                io.BytesIO(pdf_bytes),
+                media_type="application/pdf",
+                headers={"Content-Disposition": f"attachment; filename=audit-report-{audit_id}.pdf"},
+            )
+
+        if format == "json":
+            report = {
+                "report_title": "Cloud Compliance Guardian — Audit Report",
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "audit": audit_data,
+                "summary": {
+                    "total_checks": len(findings_data),
+                    "passed": sum(1 for f in findings_data if f.get("status") == "PASS"),
+                    "failed": sum(1 for f in findings_data if f.get("status") == "FAIL"),
+                    "compliance_score": audit_data["compliance_score"],
+                },
+                "findings": findings_data,
+            }
+            content = json.dumps(report, indent=2)
+            return StreamingResponse(
+                io.BytesIO(content.encode()),
+                media_type="application/json",
+                headers={"Content-Disposition": f"attachment; filename=audit-report-{audit_id}.json"},
+            )
+
+        # CSV format
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow([
+            "Status", "Severity", "Rule ID", "Rule Title", "Resource",
+            "Resource Type", "Cloud Provider", "File", "Description",
+            "Expected", "Actual", "Recommendation", "Remediation HCL"
+        ])
+        for f in findings_data:
+            writer.writerow([
+                f.get("status", ""), f.get("severity", ""), f.get("rule_id", ""),
+                f.get("rule_title", ""), f.get("resource_address", ""),
+                f.get("resource_type", ""), f.get("cloud_provider", ""),
+                f.get("file_path", ""), f.get("description", ""),
+                f.get("expected", ""), f.get("actual", ""),
+                f.get("recommendation", ""), f.get("remediation_hcl", ""),
+            ])
+        content = output.getvalue()
+        return StreamingResponse(
+            io.BytesIO(content.encode()),
+            media_type="text/csv",
+            headers={"Content-Disposition": f"attachment; filename=audit-report-{audit_id}.csv"},
+        )
+    finally:
+        session.close()
+
+
+@app.post("/api/drift/{alert_id}/ack")
+def ack_drift_alert(alert_id: int):
+    """Acknowledge a drift detection alert."""
+    session = get_session()
+    try:
+        success = acknowledge_alert(session, alert_id)
+        if not success:
+            raise HTTPException(status_code=404, detail="Alert not found")
+        return {"status": "acknowledged", "alert_id": alert_id}
+    finally:
+        session.close()
+
+
+# ─── GitHub Integration ──────────────────────────────────────────────────────
+
+
+@app.post("/api/github/connect")
+def connect_github(request: GitHubConnectRequest):
+    """Clone a GitHub repo, save to DB, and auto-trigger a scan."""
+    try:
+        repo_name = clone_repo(request.url)
+        metadata = get_repo_metadata(repo_name)
+
+        session = get_session()
+        try:
+            repo = save_github_repo(session, repo_name, request.url)
+            repo_id = repo.id
+            result = repo.to_dict()
+            result["metadata"] = metadata
+        finally:
+            session.close()
+
+        # Auto-trigger scan in background after cloning
+        def _auto_scan():
+            try:
+                sync_and_scan(repo_name)
+            except Exception:
+                pass
+            try:
+                s = get_session()
+                update_repo_sync_time(s, repo_id)
+                s.close()
+            except Exception:
+                pass
+
+        thread = threading.Thread(target=_auto_scan, daemon=True)
+        thread.start()
+
+        result["scan_triggered"] = True
+        result["message"] = "Repository cloned and scan started. Check the Audits tab for results."
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/github/repo")
+def get_github_repo():
+    """Get the currently connected GitHub repository."""
+    session = get_session()
+    try:
+        repo = get_connected_repo(session)
+        if not repo:
+            return {"connected": False}
+
+        repo_name = get_repo_name_from_url(repo.url)
+        metadata = get_repo_metadata(repo_name)
+        result = repo.to_dict()
+        result["connected"] = True
+        result["metadata"] = metadata
+        return result
+    finally:
+        session.close()
+
+
+@app.post("/api/github/sync")
+def sync_github_repo():
+    """Pull latest changes and run a compliance scan."""
+    session = get_session()
+    try:
+        repo = get_connected_repo(session)
+        if not repo:
+            raise HTTPException(status_code=404, detail="No connected repository")
+
+        repo_name = get_repo_name_from_url(repo.url)
+        repo_id = repo.id
+        session.close()
+
+        # Run scan in background thread so the API responds quickly
+        def _background_scan():
+            try:
+                sync_and_scan(repo_name)
+            except Exception:
+                pass
+            try:
+                s = get_session()
+                update_repo_sync_time(s, repo_id)
+                s.close()
+            except Exception:
+                pass
+
+        thread = threading.Thread(target=_background_scan, daemon=True)
+        thread.start()
+
+        return {"status": "syncing", "message": "Sync started. Audit will appear in Audits tab when complete."}
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/github/disconnect")
+def disconnect_github():
+    """Disconnect the GitHub repository."""
+    session = get_session()
+    try:
+        repo = get_connected_repo(session)
+        if not repo:
+            raise HTTPException(status_code=404, detail="No connected repository")
+
+        repo.is_active = False
+        session.commit()
+        return {"status": "disconnected"}
+    finally:
+        session.close()
+
+
+# ─── AWS Live Auditor ────────────────────────────────────────────────────────
+
+class AWSCredentialsRequest(BaseModel):
+    access_key: str
+    secret_key: str
+    region: Optional[str] = "us-east-1"
+
+
+# In-memory cache for latest scan results
+_aws_scan_cache: dict = {}
+
+
+def _save_aws_credentials(access_key: str, secret_key: str, region: str):
+    """Persist AWS credentials to disk so they survive server restarts."""
+    _AWS_CREDS_FILE.write_text(json.dumps({
+        "access_key": access_key,
+        "secret_key": secret_key,
+        "region": region,
+    }))
+
+
+def _load_aws_credentials():
+    """Load persisted AWS credentials on startup."""
+    if _AWS_CREDS_FILE.exists():
+        try:
+            creds = json.loads(_AWS_CREDS_FILE.read_text())
+            if creds.get("access_key") and creds.get("secret_key"):
+                os.environ["AWS_ACCESS_KEY_ID"] = creds["access_key"]
+                os.environ["AWS_SECRET_ACCESS_KEY"] = creds["secret_key"]
+                os.environ["AWS_DEFAULT_REGION"] = creds.get("region", "us-east-1")
+                return True
+        except Exception:
+            pass
+    return False
+
+
+def _delete_aws_credentials():
+    """Remove persisted AWS credentials from disk."""
+    if _AWS_CREDS_FILE.exists():
+        _AWS_CREDS_FILE.unlink()
+    os.environ.pop("AWS_ACCESS_KEY_ID", None)
+    os.environ.pop("AWS_SECRET_ACCESS_KEY", None)
+    os.environ.pop("AWS_DEFAULT_REGION", None)
+
+def _save_azure_credentials(creds: dict):
+    _AZURE_CREDS_FILE.write_text(json.dumps(creds))
+
+def _load_azure_credentials():
+    if _AZURE_CREDS_FILE.exists():
+        try:
+            creds = json.loads(_AZURE_CREDS_FILE.read_text())
+            os.environ["AZURE_TENANT_ID"] = creds.get("tenant_id", "")
+            os.environ["AZURE_CLIENT_ID"] = creds.get("client_id", "")
+            os.environ["AZURE_CLIENT_SECRET"] = creds.get("client_secret", "")
+            os.environ["AZURE_SUBSCRIPTION_ID"] = creds.get("subscription_id", "")
+            return True
+        except Exception: pass
+    return False
+
+def _delete_azure_credentials():
+    if _AZURE_CREDS_FILE.exists():
+        _AZURE_CREDS_FILE.unlink()
+    os.environ.pop("AZURE_TENANT_ID", None)
+    os.environ.pop("AZURE_CLIENT_ID", None)
+    os.environ.pop("AZURE_CLIENT_SECRET", None)
+    os.environ.pop("AZURE_SUBSCRIPTION_ID", None)
+
+def _save_gcp_credentials(creds: dict):
+    _GCP_CREDS_FILE.write_text(json.dumps(creds))
+
+def _load_gcp_credentials():
+    if _GCP_CREDS_FILE.exists():
+        try:
+            creds = json.loads(_GCP_CREDS_FILE.read_text())
+            os.environ["GOOGLE_CLOUD_PROJECT"] = creds.get("project_id", "")
+            # In a real app, you'd handle the service account JSON file path here
+            return True
+        except Exception: pass
+    return False
+
+def _delete_gcp_credentials():
+    if _GCP_CREDS_FILE.exists():
+        _GCP_CREDS_FILE.unlink()
+    os.environ.pop("GOOGLE_CLOUD_PROJECT", None)
+
+
+def _save_scan_cache(data: dict, provider: str = "aws"):
+    """Persist scan results to disk."""
+    cache_file = _AWS_SCAN_CACHE_FILE
+    if provider == "azure": cache_file = _AZURE_SCAN_CACHE_FILE
+    elif provider == "gcp": cache_file = _GCP_SCAN_CACHE_FILE
+    
+    try:
+        cache_file.write_text(json.dumps(data, default=str))
+    except Exception:
+        pass
+
+
+def _load_scan_cache(provider: str = "aws") -> dict:
+    """Load persisted scan cache on startup."""
+    cache_file = _AWS_SCAN_CACHE_FILE
+    if provider == "azure": cache_file = _AZURE_SCAN_CACHE_FILE
+    elif provider == "gcp": cache_file = _GCP_SCAN_CACHE_FILE
+    
+    if cache_file.exists():
+        try:
+            return json.loads(cache_file.read_text())
+        except Exception:
+            pass
+    return {}
+
+
+@app.get("/api/aws/status")
+def aws_connection_status():
+    """Check if AWS credentials are configured and valid."""
+    scanner = AWSScanner()
+    result = scanner.test_connection()
+    return result
+
+
+@app.post("/api/aws/configure")
+def configure_aws(creds: AWSCredentialsRequest, background_tasks: BackgroundTasks):
+    """Save AWS credentials and persist to disk until user disconnects."""
+    # Strip whitespace — copy-paste often adds trailing spaces/newlines
+    access_key = creds.access_key.strip()
+    secret_key = creds.secret_key.strip()
+    region = (creds.region or "us-east-1").strip()
+
+    os.environ["AWS_ACCESS_KEY_ID"] = access_key
+    os.environ["AWS_SECRET_ACCESS_KEY"] = secret_key
+    os.environ["AWS_DEFAULT_REGION"] = region
+
+    # Test the credentials with a fresh scanner
+    scanner = AWSScanner(access_key, secret_key, region)
+    result = scanner.test_connection()
+    if not result.get("connected"):
+        # Clean up env vars on failure so status endpoint doesn't show stale creds
+        os.environ.pop("AWS_ACCESS_KEY_ID", None)
+        os.environ.pop("AWS_SECRET_ACCESS_KEY", None)
+        return {"status": "error", "message": result.get("error", "Invalid credentials")}
+
+    # Persist credentials to disk
+    _save_aws_credentials(access_key, secret_key, region)
+    
+    # Trigger discovery in background to populate topology
+    background_tasks.add_task(run_aws_scan)
+
+    return {"status": "connected", **result}
+
+
+async def background_resource_broadcast():
+    """Notify all clients that infrastructure has changed."""
+    await manager.broadcast({
+        "type": "RESOURCE_UPDATED",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "provider": "aws"
+    })
+
+
+    return {"status": "disconnected"}
+
+
+# ── Azure Endpoints ───────────────────────────────────────────────────────
+
+@app.get("/api/azure/status")
+def azure_connection_status():
+    if not os.getenv("AZURE_CLIENT_ID"):
+        return {"connected": False}
+    return {
+        "connected": True,
+        "tenant_id": os.getenv("AZURE_TENANT_ID", "")[:8] + "...",
+        "subscription_id": os.getenv("AZURE_SUBSCRIPTION_ID", "")[:8] + "...",
+        "region": "Global (Azure)"
+    }
+
+@app.post("/api/azure/configure")
+def configure_azure(creds: AzureCredentialsRequest, background_tasks: BackgroundTasks):
+    """Save Azure credentials and persist to disk."""
+    os.environ["AZURE_TENANT_ID"] = creds.tenant_id.strip()
+    os.environ["AZURE_CLIENT_ID"] = creds.client_id.strip()
+    os.environ["AZURE_CLIENT_SECRET"] = creds.client_secret.strip()
+    os.environ["AZURE_SUBSCRIPTION_ID"] = creds.subscription_id.strip()
+    
+    scanner = AzureScanner()
+    result = scanner.test_connection()
+    if not result.get("connected"):
+        for var in ["AZURE_TENANT_ID", "AZURE_CLIENT_ID", "AZURE_CLIENT_SECRET", "AZURE_SUBSCRIPTION_ID"]:
+            os.environ.pop(var, None)
+        return {"status": "error", "message": result.get("error", "Invalid credentials")}
+
+    _save_azure_credentials({
+        "tenant_id": creds.tenant_id,
+        "client_id": creds.client_id,
+        "client_secret": creds.client_secret,
+        "subscription_id": creds.subscription_id
+    })
+    
+    # Trigger discovery in background
+    background_tasks.add_task(run_azure_scan)
+    
+    return {"status": "connected", **result}
+
+@app.post("/api/azure/disconnect")
+def disconnect_azure():
+    _delete_azure_credentials()
+    return {"status": "disconnected"}
+
+
+# ── GCP Endpoints ─────────────────────────────────────────────────────────
+
+@app.get("/api/gcp/status")
+def gcp_connection_status():
+    if not os.getenv("GOOGLE_CLOUD_PROJECT"):
+        return {"connected": False}
+    return {
+        "connected": True,
+        "project_id": os.getenv("GOOGLE_CLOUD_PROJECT", ""),
+        "user_identity": "Service Account (GCP)"
+    }
+
+@app.post("/api/gcp/configure")
+def configure_gcp(creds: GCPCredentialsRequest, background_tasks: BackgroundTasks):
+    """Save GCP credentials and persist to disk."""
+    project_id = creds.project_id.strip()
+    service_account_json = creds.service_account_json.strip()
+
+    # Save to a temp file that the scanner can use
+    key_path = _DATA_DIR / "gcp_key.json"
+    key_path.write_text(service_account_json)
+    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(key_path)
+
+    scanner = GCPScanner()
+    result = scanner.test_connection()
+    if not result.get("connected"):
+        os.environ.pop("GOOGLE_APPLICATION_CREDENTIALS", None)
+        return {"status": "error", "message": result.get("error", "Invalid credentials")}
+
+    _save_gcp_credentials({
+        "project_id": project_id,
+        "service_account_json": service_account_json
+    })
+    
+    # Trigger discovery in background
+    background_tasks.add_task(run_gcp_scan)
+    
+    return {"status": "connected", **result}
+
+@app.post("/api/gcp/disconnect")
+def disconnect_gcp():
+    _delete_gcp_credentials()
+    return {"status": "disconnected"}
+
+
+@app.post("/api/aws/scan")
+async def run_aws_scan(request: Optional[AWSScanRequest] = None):
+    """Run a full AWS live scan and audit across specified regions."""
+    global _aws_scan_cache
+    scanner = AWSScanner()
+
+    # Test connection first
+    conn = scanner.test_connection()
+    if not conn.get("connected"):
+        raise HTTPException(status_code=401, detail=conn.get("error", "AWS not configured"))
+
+    # Determine regions to scan
+    regions = request.regions if request else ["all"]
+
+    # Run the scan (synchronous blocking call, but in a thread if called via background_tasks)
+    scan_data = scanner.run_full_scan(regions=regions)
+
+    # Run the audit
+    audit_results = audit_aws_resources(scan_data)
+
+    # Merge scan summary with audit results
+    result = {
+        "scan": scan_data["summary"],
+        "scan_time": scan_data["scan_time"],
+        "regions_scanned": scan_data["regions_scanned"],
+        "primary_region": scan_data["primary_region"],
+        "resources": scan_data["resources"],
+        "audit": audit_results,
+    }
+
+    _aws_scan_cache = result
+    _save_scan_cache(result, "aws")
+    
+    # Broadcast to topology view
+    await manager.broadcast({
+        "type": "RESOURCE_UPDATED",
+        "provider": "aws",
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    })
+    
+    return result
+
+
+@app.post("/api/azure/scan")
+async def run_azure_scan():
+    """Run a full Azure live scan and audit."""
+    global _azure_scan_cache
+    scanner = AzureScanner()
+
+    # Test connection
+    conn = scanner.test_connection()
+    if not conn.get("connected"):
+        raise HTTPException(status_code=401, detail=conn.get("error", "Azure not configured"))
+
+    # Run the scan
+    scan_data = scanner.run_full_scan()
+
+    # Run the audit
+    audit_results = audit_azure_resources(scan_data)
+
+    result = {
+        "scan": scan_data["summary"],
+        "scan_time": scan_data["scan_time"],
+        "subscription_id": scan_data["subscription_id"],
+        "resources": scan_data["resources"],
+        "audit": audit_results,
+    }
+
+    _azure_scan_cache = result
+    _save_scan_cache(result, "azure")
+    
+    await manager.broadcast({
+        "type": "RESOURCE_UPDATED",
+        "provider": "azure",
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    })
+    
+    return result
+
+
+@app.get("/api/azure/scan/latest")
+def get_latest_azure_scan():
+    """Get the most recent Azure scan results from cache."""
+    if not _azure_scan_cache:
+        return {"cached": False, "message": "No scan results available. Run a scan first."}
+    return {"cached": True, **_azure_scan_cache}
+
+
+@app.post("/api/gcp/scan")
+async def run_gcp_scan():
+    """Run a full GCP live scan and audit."""
+    global _gcp_scan_cache
+    scanner = GCPScanner()
+
+    # Test connection
+    conn = scanner.test_connection()
+    if not conn.get("connected"):
+        raise HTTPException(status_code=401, detail=conn.get("error", "GCP not configured"))
+
+    # Run the scan
+    scan_data = scanner.run_full_scan()
+
+    # Run the audit
+    audit_results = audit_gcp_resources(scan_data)
+
+    result = {
+        "scan": scan_data["summary"],
+        "scan_time": scan_data["scan_time"],
+        "project_id": scan_data["project_id"],
+        "resources": scan_data["resources"],
+        "audit": audit_results,
+    }
+
+    _gcp_scan_cache = result
+    _save_scan_cache(result, "gcp")
+    
+    await manager.broadcast({
+        "type": "RESOURCE_UPDATED",
+        "provider": "gcp",
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    })
+    
+    return result
+
+
+@app.get("/api/gcp/scan/latest")
+def get_latest_gcp_scan():
+    """Get the most recent GCP scan results from cache."""
+    if not _gcp_scan_cache:
+        return {"cached": False, "message": "No scan results available. Run a scan first."}
+    return {"cached": True, **_gcp_scan_cache}
+
+
+# ─── Topology Endpoints ───────────────────────────────────────────────────────
+
+@app.websocket("/api/ws/topology")
+async def topology_websocket(websocket: WebSocket):
+    """WebSocket for real-time topology updates."""
+    await manager.connect(websocket)
+    try:
+        # Send initial snapshot if available
+        topo = get_topology()
+        await websocket.send_json({
+            "type": "INITIAL_STATE",
+            "data": topo
+        })
+        while True:
+            # Keep connection alive
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
+
+
+@app.get("/api/topology")
+def get_topology():
+    """Build a unified, hierarchical topology of all cloud providers with nested nodes."""
+    from .org_scanner import OrganizationScanner
+    try:
+        scanner = OrganizationScanner()
+        raw_metadata = scanner.get_global_topology_data()
+        
+        nodes = []
+        edges = []
+        
+        # Get latest AWS resources for injection
+        aws_resources = _aws_scan_cache.get("scan", {}).get("resources", []) if _aws_scan_cache else []
+        audit_findings = _aws_scan_cache.get("audit", {}).get("findings", []) if _aws_scan_cache else []
+
+        def build_nested_nodes(node_data, parent_id=None, depth=0, base_x=0):
+            node_id = node_data["id"]
+            node_type = node_data["type"]
+            is_parent = len(node_data.get("children", [])) > 0 or node_type == "account"
+            
+            # Node dimensions based on depth and type
+            width = 800 - (depth * 100) if is_parent else 180
+            height = 500 - (depth * 50) if is_parent else 80
+            
+            # React Flow Node
+            rf_node = {
+                "id": node_id,
+                "type": "group" if is_parent else "resource",
+                "data": {
+                    "label": node_data["name"],
+                    "type": node_type,
+                    "depth": depth,
+                    "provider": "aws" if "aws" in node_id or depth > 0 else "multi"
+                },
+                "position": {"x": 50 if parent_id else base_x, "y": 100 if parent_id else depth * 400},
+                "style": {
+                    "width": width,
+                    "height": height,
+                    "backgroundColor": "rgba(15, 23, 42, 0.5)" if is_parent else "rgba(30, 41, 59, 0.8)",
+                    "borderRadius": "12px",
+                    "border": f"1px solid {'#3b82f6' if not parent_id else 'rgba(255,255,255,0.1)'}"
+                }
+            }
+            if parent_id:
+                rf_node["parentNode"] = parent_id
+                rf_node["extent"] = "parent"
+            
+            nodes.append(rf_node)
+            
+            # Connect to parent in the tree (optional for flow, but good for dagre)
+            if parent_id:
+                edges.append({
+                    "id": f"edge-{parent_id}-{node_id}",
+                    "source": parent_id,
+                    "target": node_id,
+                    "animated": True,
+                    "style": {"stroke": "rgba(255,255,255,0.2)", "strokeWidth": 1}
+                })
+
+            # Process children
+            current_x = 50
+            for child in node_data.get("children", []):
+                build_nested_nodes(child, node_id, depth + 1)
+                
+            # If it's an AWS Account, inject real discovered resources as nested children
+            if node_type == "account":
+                acc_res = [r for r in aws_resources if r.get("account_id") == node_id]
+                for i, res in enumerate(acc_res[:20]): # Sample for visualization
+                    res_id = res.get("resource_id")
+                    res_type = res.get("resource_type")
+                    is_failed = any(f.get("resource_id") == res_id and f.get("status") == "FAIL" for f in audit_findings)
+                    
+                    nodes.append({
+                        "id": f"res-{res_id}",
+                        "type": "resource",
+                        "parentNode": node_id,
+                        "extent": "parent",
+                        "data": {
+                            "label": res.get("resource_name", res_id),
+                            "type": res_type,
+                            "status": "fail" if is_failed else "pass",
+                            "config": res.get("config", {})
+                        },
+                        "position": {"x": 40 + (i % 3) * 220, "y": 120 + (i // 3) * 100}
+                    })
+
+        # Process from global root
+        start_x = 0
+        build_nested_nodes(raw_metadata["root"], base_x=0)
+        
+        return {"nodes": nodes, "edges": edges}
+    except Exception as e:
+        logger.error(f"Failed to generate topology: {e}")
+        return {"nodes": [], "edges": [], "error": str(e)}
+
+
+@app.get("/api/aws/scan/latest")
+def get_latest_aws_scan():
+    """Get the most recent AWS scan results from cache."""
+    if not _aws_scan_cache:
+        return {"cached": False, "message": "No scan results available. Run a scan first."}
+    return {"cached": True, **_aws_scan_cache}
+
+
+@app.get("/api/aws/scan/report")
+def download_aws_report(format: str = Query("pdf", pattern="^(pdf|csv|json)$")):
+    """Download the latest AWS live scan report."""
+    if not _aws_scan_cache:
+        raise HTTPException(status_code=404, detail="No scan results. Run a scan first.")
+
+    audit = _aws_scan_cache.get("audit", {})
+    scan = _aws_scan_cache.get("scan", {})
+    findings_list = audit.get("findings", [])
+    region = _aws_scan_cache.get("region", "unknown")
+    scan_time = _aws_scan_cache.get("scan_time", "")
+
+    if format == "json":
+        report = {
+            "report_title": "Cloud Compliance Guardian — AWS Live Audit Report",
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "region": region,
+            "scan_time": scan_time,
+            "scan_summary": scan,
+            "health_score": audit.get("health_score", 0),
+            "total_checks": audit.get("total_checks", 0),
+            "passed": audit.get("passed", 0),
+            "failed": audit.get("failed", 0),
+            "findings": findings_list,
+        }
+        content = json.dumps(report, indent=2, default=str)
+        return StreamingResponse(
+            io.BytesIO(content.encode()),
+            media_type="application/json",
+            headers={"Content-Disposition": f"attachment; filename=aws-audit-report.json"},
+        )
+
+    if format == "csv":
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow([
+            "Status", "Severity", "Rule ID", "Title", "Resource",
+            "Resource Type", "Cloud Provider", "Description", "Reasoning",
+            "Expected", "Actual", "Recommendation", "Remediation"
+        ])
+        for f in findings_list:
+            writer.writerow([
+                f.get("status", ""), f.get("severity", ""),
+                f.get("cis_rule_id", f.get("rule_id", "")),
+                f.get("title", f.get("rule_title", "")),
+                f.get("resource_name", f.get("resource", "")),
+                f.get("resource_type", ""), "AWS",
+                f.get("description", ""), f.get("reasoning", ""),
+                f.get("expected", ""), f.get("actual", ""),
+                f.get("recommendation", ""), f.get("remediation_step", ""),
+            ])
+        content = output.getvalue()
+        return StreamingResponse(
+            io.BytesIO(content.encode()),
+            media_type="text/csv",
+            headers={"Content-Disposition": f"attachment; filename=aws-audit-report.csv"},
+        )
+
+    # PDF
+    from .report_generator import generate_aws_pdf_report
+    pdf_bytes = generate_aws_pdf_report(_aws_scan_cache)
+    return StreamingResponse(
+        io.BytesIO(pdf_bytes),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename=aws-audit-report.pdf"},
+    )
+
+
+@app.get("/api/aws/events")
+def get_aws_events():
+    """Fetch latest CloudTrail events."""
+    scanner = AWSScanner()
+    conn = scanner.test_connection()
+    if not conn.get("connected"):
+        raise HTTPException(status_code=401, detail=conn.get("error", "AWS not configured"))
+
+    events = scanner.fetch_cloudtrail_events(max_events=50)
+    # Analyze each event
+    from .aws_auditor import audit_cloudtrail_event
+    analyzed = [audit_cloudtrail_event(e) for e in events if "error" not in e]
+    return {"events": analyzed, "total": len(analyzed)}
