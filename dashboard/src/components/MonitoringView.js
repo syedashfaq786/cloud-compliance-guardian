@@ -1,15 +1,9 @@
 "use client";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { Icon } from "./Icons";
 
 const API = "http://localhost:8000";
 
-const SEVERITY_META = {
-  "CRITICAL": { action: "Immediate remediation required", timeline: "Fix within 24 hours", color: "#ef4444" },
-  "HIGH": { action: "Schedule remediation promptly", timeline: "Fix within 1 week", color: "#f97316" },
-  "MEDIUM": { action: "Plan remediation in next sprint", timeline: "Fix within 30 days", color: "#eab308" },
-  "LOW": { action: "Address during routine maintenance", timeline: "Fix within 90 days", color: "#3b82f6" },
-};
 
 export default function MonitoringView({ onNavigate }) {
   const [awsStatus, setAwsStatus] = useState(null);
@@ -22,14 +16,12 @@ export default function MonitoringView({ onNavigate }) {
   const [events, setEvents] = useState([]);
   const [activeTab, setActiveTab] = useState("overview");
   const [activeFilter, setActiveFilter] = useState("all");
-  const [expandedFinding, setExpandedFinding] = useState(null);
-  const [copiedId, setCopiedId] = useState(null);
   
-  const [availableRegions, setAvailableRegions] = useState([]);
-  const [selectedRegions, setSelectedRegions] = useState(["all"]);
+  const [availableRegions, setAvailableRegions] = useState([]); // eslint-disable-line
+  const [selectedRegions, setSelectedRegions] = useState([]);
   const [showRegionFilter, setShowRegionFilter] = useState(false);
-  
-  const feedRef = useRef(null);
+  const [downloading, setDownloading] = useState(null); // 'pdf' | 'csv' | 'json' | null
+
 
   useEffect(() => {
     checkCloudStatuses();
@@ -48,6 +40,8 @@ export default function MonitoringView({ onNavigate }) {
       const res = await fetch(`${API}/api/aws/regions`);
       const data = await res.json();
       setAvailableRegions(data.regions || []);
+      // Default to primary region only for fast scans
+      if (data.primary) setSelectedRegions([data.primary]);
     } catch (err) {
       console.error("Failed to fetch AWS regions", err);
     }
@@ -91,7 +85,7 @@ export default function MonitoringView({ onNavigate }) {
   const handleScan = async () => {
     setScanning(true);
     try {
-      const body = selectedCloud === "aws" ? { regions: selectedRegions } : {};
+      const body = selectedCloud === "aws" ? { regions: selectedRegions.length ? selectedRegions : null } : {};
       const res = await fetch(`${API}/api/${selectedCloud}/scan`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -120,26 +114,24 @@ export default function MonitoringView({ onNavigate }) {
   };
 
   const handleDownloadReport = async (format) => {
+    setDownloading(format);
     try {
       const res = await fetch(`${API}/api/${selectedCloud}/scan/report?format=${format}`);
-      if (!res.ok) return alert("Report download failed");
+      if (!res.ok) { alert("Report download failed — run a scan first."); return; }
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `${selectedCloud}-audit-report.${format}`;
+      a.download = `${selectedCloud}-compliance-report.${format}`;
       a.click();
       URL.revokeObjectURL(url);
     } catch (err) {
       alert("Failed to download report: " + err.message);
+    } finally {
+      setDownloading(null);
     }
   };
 
-  const handleCopy = (text, id) => {
-    navigator.clipboard.writeText(text);
-    setCopiedId(id);
-    setTimeout(() => setCopiedId(null), 2000);
-  };
 
   const handleDisconnect = async () => {
     try {
@@ -215,29 +207,87 @@ export default function MonitoringView({ onNavigate }) {
         ))}
       </div>
 
-      <div className="page-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 32 }}>
+      {/* ── Page header ── */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 }}>
         <div>
           <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 4 }}>
             <img src={cloudLogo} alt="" style={{ width: 32, height: 32 }} />
             <h2 style={{ margin: 0 }}>{selectedCloud.toUpperCase()} Monitoring</h2>
           </div>
           <p style={{ margin: 0, fontSize: 13, color: "var(--text-secondary)" }}>
-            Managing compliance for {selectedCloud === "aws" ? currentStatus?.user : currentStatus?.project_id || currentStatus?.tenant_id}
-            <span style={{ color: "#22c55e", marginLeft: 8 }}>● Connected</span>
+            Managing compliance for <strong>{selectedCloud === "aws" ? currentStatus?.user : currentStatus?.project_id || currentStatus?.tenant_id}</strong>
+            <span style={{ color: "#22c55e", marginLeft: 10, fontWeight: 600 }}>● Connected</span>
           </p>
         </div>
-        <div style={{ display: "flex", gap: 12 }}>
+
+        {/* Right action buttons — scan + region + disconnect */}
+        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
           {selectedCloud === "aws" && (
-             <button onClick={() => setShowRegionFilter(!showRegionFilter)} style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 16px", background: "var(--bg-tertiary)", border: "1px solid var(--border-color)", borderRadius: 8, cursor: "pointer", fontSize: 13 }}>
-               <Icon name="globe" size={14} /> {selectedRegions.includes("all") ? "All Regions" : `${selectedRegions.length} Regions`}
-             </button>
+            <button
+              onClick={() => setShowRegionFilter(!showRegionFilter)}
+              style={{
+                display: "flex", alignItems: "center", gap: 8, padding: "9px 16px",
+                background: "var(--bg-tertiary)", border: "1px solid var(--border-color)",
+                borderRadius: 8, cursor: "pointer", fontSize: 13,
+                color: "var(--text-primary)", fontWeight: 500,
+              }}
+            >
+              <Icon name="globe" size={14} />
+              {selectedRegions.length === 1 ? selectedRegions[0] : selectedRegions.length > 1 ? `${selectedRegions.length} Regions` : "Select Region"}
+            </button>
           )}
-          <button className="save-btn" onClick={handleScan} disabled={scanning} style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 20px" }}>
-            {scanning ? <><span className="spinner"></span> Scanning...</> : <><Icon name="refresh" size={16} /> Run Live Scan</>}
+          <button className="save-btn" onClick={handleScan} disabled={scanning} style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 20px" }}>
+            {scanning ? <><span className="spinner"></span> Scanning…</> : <><Icon name="refresh" size={16} /> Run Live Scan</>}
           </button>
-          <button onClick={handleDisconnect} style={{ padding: "10px 16px", background: "rgba(220,53,69,0.1)", color: "#dc3545", border: "1px solid rgba(220,53,69,0.3)", borderRadius: 8, fontSize: 13, cursor: "pointer" }}>Disconnect</button>
+          <button
+            onClick={handleDisconnect}
+            style={{ padding: "9px 16px", background: "rgba(220,53,69,0.08)", color: "#dc3545", border: "1px solid rgba(220,53,69,0.25)", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: "pointer" }}
+          >
+            Disconnect
+          </button>
         </div>
       </div>
+
+      {/* ── Download report bar (only when scan results exist) ── */}
+      {scanResults && !scanResults.error && (
+        <div style={{
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          padding: "12px 18px", marginBottom: 24,
+          background: "var(--bg-card)", border: "1px solid var(--border-color)",
+          borderRadius: 12, boxShadow: "var(--shadow-card)",
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div style={{ width: 32, height: 32, borderRadius: 8, background: "rgba(255,122,0,0.1)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <Icon name="file-text" size={16} style={{ color: "var(--accent-amber)" }} />
+            </div>
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)" }}>Compliance Report Ready</div>
+              <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                Last scan: {scanResults?.scan_time ? new Date(scanResults.scan_time).toLocaleString() : "Available"}
+              </div>
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <button
+              className="save-btn"
+              onClick={() => handleDownloadReport("pdf")}
+              disabled={!!downloading}
+              style={{ display: "flex", alignItems: "center", gap: 7, padding: "9px 18px" }}
+            >
+              <Icon name="file-text" size={14} />
+              {downloading === "pdf" ? "Generating…" : "Download Report (PDF)"}
+            </button>
+            <button className="download-btn" onClick={() => handleDownloadReport("csv")} disabled={!!downloading}>
+              <Icon name="file-text" size={13} />
+              {downloading === "csv" ? "…" : "CSV"}
+            </button>
+            <button className="download-btn" onClick={() => handleDownloadReport("json")} disabled={!!downloading}>
+              <Icon name="file-text" size={13} />
+              {downloading === "json" ? "…" : "JSON"}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Sub-Tabs */}
       <div style={{ display: "flex", gap: 32, marginBottom: 32, borderBottom: "1px solid var(--border-color)" }}>

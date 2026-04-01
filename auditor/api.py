@@ -504,8 +504,7 @@ class AWSCredentialsRequest(BaseModel):
     region: Optional[str] = "us-east-1"
 
 
-# In-memory cache for latest scan results
-_aws_scan_cache: dict = {}
+# (aws_scan_cache initialized at module top)
 
 
 def _save_aws_credentials(access_key: str, secret_key: str, region: str):
@@ -639,9 +638,6 @@ def configure_aws(creds: AWSCredentialsRequest, background_tasks: BackgroundTask
 
     # Persist credentials to disk
     _save_aws_credentials(access_key, secret_key, region)
-    
-    # Trigger discovery in background to populate topology
-    background_tasks.add_task(run_aws_scan)
 
     return {"status": "connected", **result}
 
@@ -755,13 +751,8 @@ async def run_aws_scan(request: Optional[AWSScanRequest] = None):
     global _aws_scan_cache
     scanner = AWSScanner()
 
-    # Test connection first
-    conn = scanner.test_connection()
-    if not conn.get("connected"):
-        raise HTTPException(status_code=401, detail=conn.get("error", "AWS not configured"))
-
-    # Determine regions to scan
-    regions = request.regions if request else ["all"]
+    # Determine regions to scan — default to primary region for speed
+    regions = (request.regions if request else None) or [scanner.region]
 
     # Run the scan (synchronous blocking call, but in a thread if called via background_tasks)
     scan_data = scanner.run_full_scan(regions=regions)
@@ -904,98 +895,177 @@ async def topology_websocket(websocket: WebSocket):
 
 @app.get("/api/topology")
 def get_topology():
-    """Build a unified, hierarchical topology of all cloud providers with nested nodes."""
-    from .org_scanner import OrganizationScanner
+    """
+    Build a force-graph topology from scan cache.
+    Returns nodes and edges with relationship data for D3 force simulation.
+    """
     try:
-        scanner = OrganizationScanner()
-        raw_metadata = scanner.get_global_topology_data()
-        
+        resources = _aws_scan_cache.get("resources", []) if _aws_scan_cache else []
+        findings  = _aws_scan_cache.get("audit", {}).get("findings", []) if _aws_scan_cache else []
+        scan_meta = _aws_scan_cache.get("scan", {}) if _aws_scan_cache else {}
+
+        failed_ids = {f.get("resource_id") for f in findings if f.get("status") == "FAIL"}
+
+        if not resources:
+            return {"nodes": [], "edges": [], "groups": [],
+                    "meta": {"total": 0, "compliant": 0, "violations": 0, "scan_time": None}}
+
+        TYPE_META = {
+            "aws_iam_user":        {"label": "IAM Users",        "color": "#a78bfa", "group": "Identity"},
+            "aws_iam_policy":      {"label": "IAM Policies",     "color": "#7c3aed", "group": "Identity"},
+            "aws_s3_bucket":       {"label": "S3 Buckets",       "color": "#60a5fa", "group": "Storage"},
+            "aws_ec2_instance":    {"label": "EC2 Instances",    "color": "#34d399", "group": "Compute"},
+            "aws_security_group":  {"label": "Security Groups",  "color": "#f59e0b", "group": "Network"},
+            "aws_vpc":             {"label": "VPCs",             "color": "#22d3ee", "group": "Network"},
+            "aws_rds_instance":    {"label": "RDS Instances",    "color": "#fb923c", "group": "Database"},
+            "aws_lambda_function": {"label": "Lambda Functions", "color": "#e879f9", "group": "Compute"},
+            "aws_ec2_subnet":      {"label": "Subnets",          "color": "#6ee7b7", "group": "Network"},
+            "aws_ec2_internet-gateway": {"label": "IGWs",        "color": "#38bdf8", "group": "Network"},
+            "aws_secretsmanager_secret": {"label": "Secrets",    "color": "#f87171", "group": "Security"},
+        }
+
+        # Build resource id → node index map
+        res_by_id = {r.get("resource_id"): r for r in resources if r.get("resource_id")}
+
         nodes = []
         edges = []
-        
-        # Get latest AWS resources for injection
-        aws_resources = _aws_scan_cache.get("scan", {}).get("resources", []) if _aws_scan_cache else []
-        audit_findings = _aws_scan_cache.get("audit", {}).get("findings", []) if _aws_scan_cache else []
+        edge_set = set()
+        total_compliant = 0
+        total_violations = 0
+        type_counts = {}
 
-        def build_nested_nodes(node_data, parent_id=None, depth=0, base_x=0):
-            node_id = node_data["id"]
-            node_type = node_data["type"]
-            is_parent = len(node_data.get("children", [])) > 0 or node_type == "account"
-            
-            # Node dimensions based on depth and type
-            width = 800 - (depth * 100) if is_parent else 180
-            height = 500 - (depth * 50) if is_parent else 80
-            
-            # React Flow Node
-            rf_node = {
-                "id": node_id,
-                "type": "group" if is_parent else "resource",
-                "data": {
-                    "label": node_data["name"],
-                    "type": node_type,
-                    "depth": depth,
-                    "provider": "aws" if "aws" in node_id or depth > 0 else "multi"
-                },
-                "position": {"x": 50 if parent_id else base_x, "y": 100 if parent_id else depth * 400},
-                "style": {
-                    "width": width,
-                    "height": height,
-                    "backgroundColor": "rgba(15, 23, 42, 0.5)" if is_parent else "rgba(30, 41, 59, 0.8)",
-                    "borderRadius": "12px",
-                    "border": f"1px solid {'#3b82f6' if not parent_id else 'rgba(255,255,255,0.1)'}"
-                }
+        for res in resources:
+            rid   = res.get("resource_id")
+            rtype = res.get("resource_type", "aws_unknown")
+            if not rid:
+                continue
+
+            is_fail = rid in failed_ids
+            if is_fail:
+                total_violations += 1
+            else:
+                total_compliant += 1
+
+            type_counts[rtype] = type_counts.get(rtype, 0) + 1
+            meta = TYPE_META.get(rtype, {"label": rtype.replace("aws_","").replace("_"," ").title(), "color": "#94a3b8", "group": "Other"})
+
+            nodes.append({
+                "id":      rid,
+                "label":   res.get("resource_name") or rid,
+                "type":    rtype,
+                "group":   meta["group"],
+                "color":   meta["color"],
+                "status":  "fail" if is_fail else "pass",
+                "region":  res.get("region", "global"),
+                "config":  res.get("config", {}),
+            })
+
+        # ── Build edges from config relationships ─────────────────────────────
+        vpc_id_to_rid   = {}
+        sg_id_to_rid    = {}
+        subnet_id_to_rid = {}
+
+        for res in resources:
+            rid   = res.get("resource_id")
+            rtype = res.get("resource_type", "")
+            cfg   = res.get("config", {})
+            if not rid:
+                continue
+            if rtype == "aws_vpc":
+                # store original vpc_id from config
+                pass
+            if rtype == "aws_security_group":
+                pass
+            if rtype == "aws_ec2_subnet":
+                pass
+
+        # EC2 → Security Group edges
+        for res in resources:
+            rid   = res.get("resource_id")
+            rtype = res.get("resource_type", "")
+            cfg   = res.get("config", {})
+            if not rid:
+                continue
+
+            # EC2 instances linked to security groups by resource_id hash matching
+            if rtype == "aws_ec2_instance":
+                for sg in cfg.get("security_groups", []):
+                    # find sg node by matching hashed id
+                    from .aws_scanner import AWSScanner
+                    hashed = AWSScanner._hash_id(sg)
+                    if hashed in res_by_id:
+                        ek = f"{rid}:{hashed}"
+                        if ek not in edge_set:
+                            edge_set.add(ek)
+                            edges.append({"source": rid, "target": hashed, "type": "uses_sg"})
+
+        # IAM Policy → IAM User edges (policies attached to users)
+        # Link by attachment_count heuristic — connect policies to first N users
+        iam_users   = [r for r in resources if r.get("resource_type") == "aws_iam_user"]
+        iam_policies = [r for r in resources if r.get("resource_type") == "aws_iam_policy"]
+        for pol in iam_policies:
+            pid = pol.get("resource_id")
+            cnt = pol.get("config", {}).get("attachment_count", 0)
+            if cnt and pid:
+                for user in iam_users[:min(cnt, 3)]:
+                    uid = user.get("resource_id")
+                    ek  = f"{pid}:{uid}"
+                    if uid and ek not in edge_set:
+                        edge_set.add(ek)
+                        edges.append({"source": pid, "target": uid, "type": "attached_to"})
+
+        # VPC → Subnet edges (same region cluster)
+        vpcs    = [r for r in resources if r.get("resource_type") == "aws_vpc"]
+        subnets = [r for r in resources if r.get("resource_type") == "aws_ec2_subnet"]
+        for vpc in vpcs:
+            vid = vpc.get("resource_id")
+            vregion = vpc.get("region")
+            if not vid:
+                continue
+            for sub in subnets:
+                sid = sub.get("resource_id")
+                if sid and sub.get("region") == vregion:
+                    ek = f"{vid}:{sid}"
+                    if ek not in edge_set:
+                        edge_set.add(ek)
+                        edges.append({"source": vid, "target": sid, "type": "contains"})
+
+        # Build groups summary
+        groups = []
+        group_map = {}
+        for rtype, meta in TYPE_META.items():
+            g = meta["group"]
+            if g not in group_map:
+                group_map[g] = {"name": g, "types": [], "count": 0, "violations": 0}
+            group_map[g]["types"].append(rtype)
+        for res in resources:
+            rtype = res.get("resource_type", "")
+            rid   = res.get("resource_id")
+            meta  = TYPE_META.get(rtype, {"group": "Other"})
+            g     = meta["group"]
+            if g not in group_map:
+                group_map[g] = {"name": g, "types": [], "count": 0, "violations": 0}
+            group_map[g]["count"] += 1
+            if rid in failed_ids:
+                group_map[g]["violations"] += 1
+        groups = list(group_map.values())
+
+        return {
+            "nodes": nodes,
+            "edges": edges,
+            "groups": groups,
+            "type_counts": type_counts,
+            "meta": {
+                "total":      len(nodes),
+                "compliant":  total_compliant,
+                "violations": total_violations,
+                "regions":    scan_meta.get("regions_scanned", []),
+                "scan_time":  _aws_scan_cache.get("scan_time") if _aws_scan_cache else None,
             }
-            if parent_id:
-                rf_node["parentNode"] = parent_id
-                rf_node["extent"] = "parent"
-            
-            nodes.append(rf_node)
-            
-            # Connect to parent in the tree (optional for flow, but good for dagre)
-            if parent_id:
-                edges.append({
-                    "id": f"edge-{parent_id}-{node_id}",
-                    "source": parent_id,
-                    "target": node_id,
-                    "animated": True,
-                    "style": {"stroke": "rgba(255,255,255,0.2)", "strokeWidth": 1}
-                })
-
-            # Process children
-            current_x = 50
-            for child in node_data.get("children", []):
-                build_nested_nodes(child, node_id, depth + 1)
-                
-            # If it's an AWS Account, inject real discovered resources as nested children
-            if node_type == "account":
-                acc_res = [r for r in aws_resources if r.get("account_id") == node_id]
-                for i, res in enumerate(acc_res[:20]): # Sample for visualization
-                    res_id = res.get("resource_id")
-                    res_type = res.get("resource_type")
-                    is_failed = any(f.get("resource_id") == res_id and f.get("status") == "FAIL" for f in audit_findings)
-                    
-                    nodes.append({
-                        "id": f"res-{res_id}",
-                        "type": "resource",
-                        "parentNode": node_id,
-                        "extent": "parent",
-                        "data": {
-                            "label": res.get("resource_name", res_id),
-                            "type": res_type,
-                            "status": "fail" if is_failed else "pass",
-                            "config": res.get("config", {})
-                        },
-                        "position": {"x": 40 + (i % 3) * 220, "y": 120 + (i // 3) * 100}
-                    })
-
-        # Process from global root
-        start_x = 0
-        build_nested_nodes(raw_metadata["root"], base_x=0)
-        
-        return {"nodes": nodes, "edges": edges}
+        }
     except Exception as e:
-        logger.error(f"Failed to generate topology: {e}")
-        return {"nodes": [], "edges": [], "error": str(e)}
+        logger.error(f"Failed to generate topology: {e}", exc_info=True)
+        return {"nodes": [], "edges": [], "groups": [], "error": str(e), "meta": {}}
 
 
 @app.get("/api/aws/scan/latest")

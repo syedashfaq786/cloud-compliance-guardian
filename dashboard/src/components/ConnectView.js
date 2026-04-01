@@ -403,14 +403,105 @@ export default function ConnectView() {
         </div>
       </section>
 
-      {/* ── Section 2: File Upload ──────────────────────────────────── */}
+      {/* ── Section 2: Infrastructure as Code Upload ─────────────── */}
       <section style={{ marginBottom: 36 }}>
-        <h3 style={{ fontSize: 18, marginBottom: 16 }}>2. Upload Terraform Files</h3>
-        <div className="glass-card upload-zone" onClick={handleUploadClick}>
-          <div className="upload-icon"><Icon name="upload" size={32} /></div>
-          <h3>Drop your .tf files here</h3>
-          <p>Or click to browse your local machine. Supports .tf and .tfvars files.</p>
-          <button className="save-btn" style={{ padding: "10px 24px" }}>Select Files</button>
+        <h3 style={{ fontSize: 18, marginBottom: 6 }}>2. Upload Infrastructure as Code</h3>
+        <p style={{ fontSize: 13, color: "var(--text-secondary)", marginBottom: 20 }}>
+          Upload configuration files from Terraform, Docker, or Kubernetes for compliance analysis.
+        </p>
+
+        {/* Three upload cards */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16, marginBottom: 16 }}>
+          {[
+            {
+              logo: "/logos/terraform.svg",
+              name: "Terraform",
+              desc: "HCL infrastructure definitions",
+              ext: ".tf, .tfvars",
+              accept: ".tf,.tfvars",
+              bg: "#5c4ee510",
+              border: "#5c4ee530",
+              badge: "#5c4ee5",
+            },
+            {
+              logo: "/logos/docker.svg",
+              name: "Docker",
+              desc: "Container image definitions",
+              ext: "Dockerfile, .yaml",
+              accept: ".yaml,.yml,Dockerfile",
+              bg: "#2496ed10",
+              border: "#2496ed30",
+              badge: "#2496ed",
+            },
+            {
+              logo: "/logos/kubernetes.svg",
+              name: "Kubernetes",
+              desc: "Cluster resource manifests",
+              ext: ".yaml, .json",
+              accept: ".yaml,.yml,.json",
+              bg: "#326ce510",
+              border: "#326ce530",
+              badge: "#326ce5",
+            },
+          ].map((tool) => (
+            <div
+              key={tool.name}
+              onClick={handleUploadClick}
+              style={{
+                display: "flex", flexDirection: "column", alignItems: "center",
+                padding: "28px 20px 20px", borderRadius: 16, cursor: "pointer",
+                background: tool.bg,
+                border: `1.5px dashed ${tool.border}`,
+                transition: "all 0.2s ease",
+                position: "relative",
+              }}
+              onMouseEnter={e => { e.currentTarget.style.transform = "translateY(-3px)"; e.currentTarget.style.boxShadow = `0 8px 24px ${tool.border}`; }}
+              onMouseLeave={e => { e.currentTarget.style.transform = "none"; e.currentTarget.style.boxShadow = "none"; }}
+            >
+              {/* Logo */}
+              <div style={{ width: 56, height: 56, marginBottom: 14, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <img src={tool.logo} alt={tool.name} style={{ width: 52, height: 52, objectFit: "contain" }} />
+              </div>
+
+              <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text-primary)", marginBottom: 4 }}>{tool.name}</div>
+              <div style={{ fontSize: 12, color: "var(--text-secondary)", marginBottom: 12, textAlign: "center" }}>{tool.desc}</div>
+
+              {/* File types badge */}
+              <div style={{ fontSize: 11, fontWeight: 600, color: tool.badge, background: `${tool.badge}12`, border: `1px solid ${tool.badge}25`, padding: "3px 10px", borderRadius: 20, marginBottom: 16 }}>
+                {tool.ext}
+              </div>
+
+              {/* Upload button */}
+              <button
+                onClick={(e) => { e.stopPropagation(); handleUploadClick(); }}
+                style={{
+                  display: "flex", alignItems: "center", gap: 6,
+                  padding: "8px 18px", borderRadius: 8,
+                  background: tool.badge, color: "#fff",
+                  border: "none", fontSize: 13, fontWeight: 600, cursor: "pointer",
+                  width: "100%", justifyContent: "center",
+                  transition: "opacity 0.15s",
+                }}
+                onMouseEnter={e => e.currentTarget.style.opacity = "0.85"}
+                onMouseLeave={e => e.currentTarget.style.opacity = "1"}
+              >
+                <Icon name="upload" size={14} /> Upload Files
+              </button>
+            </div>
+          ))}
+        </div>
+
+        {/* Drag & drop fallback zone */}
+        <div className="glass-card upload-zone" onClick={handleUploadClick}
+          style={{ padding: "18px 24px", display: "flex", flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 16 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+            <Icon name="upload" size={24} style={{ color: "var(--accent-amber)", flexShrink: 0 }} />
+            <div>
+              <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)" }}>Or drag & drop any file here</div>
+              <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>Supports .tf, .tfvars, Dockerfile, .yaml, .json</div>
+            </div>
+          </div>
+          <button className="save-btn" style={{ padding: "8px 20px", flexShrink: 0 }}>Browse Files</button>
         </div>
       </section>
 
@@ -463,10 +554,8 @@ export default function ConnectView() {
         <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(10, 15, 25, 0.92)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, backdropFilter: "blur(8px)" }}
           onClick={() => { setShowAwsConfig(false); setAwsError(""); }}>
           <div className="glass-card animate-fade-in" style={{ width: 500, padding: 32, cursor: "default" }} onClick={(e) => e.stopPropagation()}>
-            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 24 }}>
-              <div style={{ width: 48, height: 48, borderRadius: 12, background: "linear-gradient(135deg, #ff9900, #ff6600)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                <Icon name="aws" size={28} />
-              </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 24 }}>
+              <img src="/logos/aws.svg" alt="AWS" style={{ width: 48, height: 48, objectFit: "contain" }} />
               <div>
                 <h3 style={{ margin: 0, fontSize: 18 }}>Connect AWS Account</h3>
                 <p style={{ margin: 0, fontSize: 13, color: "var(--text-secondary)" }}>Enter your programmatic access keys</p>
@@ -512,7 +601,7 @@ export default function ConnectView() {
                 style={{ background: "var(--bg-tertiary)", color: "var(--text-primary)", border: "1px solid var(--border-color)" }}>Cancel</button>
               <button className="save-btn" onClick={handleAwsConfigure} disabled={awsConfiguring}
                 style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                {awsConfiguring ? "Connecting..." : (<><Icon name="aws" size={16} />Connect</>)}
+                {awsConfiguring ? "Connecting..." : "Connect"}
               </button>
             </div>
             <p style={{ fontSize: 11, color: "var(--text-secondary)", marginTop: 12, textAlign: "center" }}>
@@ -527,10 +616,8 @@ export default function ConnectView() {
         <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(10, 15, 25, 0.92)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, backdropFilter: "blur(8px)" }}
           onClick={() => { setShowAzureConfig(false); setAzureError(""); }}>
           <div className="glass-card animate-fade-in" style={{ width: 500, padding: 32, cursor: "default" }} onClick={(e) => e.stopPropagation()}>
-            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 24 }}>
-              <div style={{ width: 48, height: 48, borderRadius: 12, background: "linear-gradient(135deg, #0078d4, #005a9e)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                <Icon name="azure" size={28} />
-              </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 24 }}>
+              <img src="/logos/azure.svg" alt="Azure" style={{ width: 48, height: 48, objectFit: "contain" }} />
               <div>
                 <h3 style={{ margin: 0, fontSize: 18 }}>Connect Azure Account</h3>
                 <p style={{ margin: 0, fontSize: 13, color: "var(--text-secondary)" }}>Enter your service principal credentials</p>
@@ -571,10 +658,8 @@ export default function ConnectView() {
         <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(10, 15, 25, 0.92)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, backdropFilter: "blur(8px)" }}
           onClick={() => { setShowGcpConfig(false); setGcpError(""); }}>
           <div className="glass-card animate-fade-in" style={{ width: 500, padding: 32, cursor: "default" }} onClick={(e) => e.stopPropagation()}>
-            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 24 }}>
-              <div style={{ width: 48, height: 48, borderRadius: 12, background: "linear-gradient(135deg, #4285f4, #34a853)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                <Icon name="gcp" size={28} />
-              </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 24 }}>
+              <img src="/logos/gcp.svg" alt="GCP" style={{ width: 48, height: 48, objectFit: "contain" }} />
               <div>
                 <h3 style={{ margin: 0, fontSize: 18 }}>Connect GCP Project</h3>
                 <p style={{ margin: 0, fontSize: 13, color: "var(--text-secondary)" }}>Enter your project details and service account</p>

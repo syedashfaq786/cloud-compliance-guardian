@@ -9,6 +9,7 @@ import os
 import re
 import json
 import hashlib
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone, timedelta
 from typing import List, Dict, Any, Optional
 
@@ -539,12 +540,58 @@ class AWSScanner:
 
     # ── Full Scan ─────────────────────────────────────────────────────────────
 
+    def _scan_region(self, reg: str) -> Dict[str, Any]:
+        """Scan all regional resources for a single region. Used for parallel execution."""
+        region_data = {
+            "resources": [],
+            "events": [],
+            "ec2_instances": 0,
+            "vpcs": 0,
+            "security_groups": 0,
+            "rds_instances": 0,
+            "lambda_functions": 0,
+            "cloudtrail_events": 0,
+        }
+
+        instances = self.scan_ec2_instances(region=reg)
+        region_data["resources"].extend(instances)
+        region_data["ec2_instances"] = len([r for r in instances if "error" not in r])
+
+        vpcs = self.scan_vpcs(region=reg)
+        region_data["resources"].extend(vpcs)
+        region_data["vpcs"] = len([r for r in vpcs if "error" not in r])
+
+        sg_resources = self.scan_security_groups(region=reg)
+        for r in sg_resources:
+            if "error" not in r:
+                r["region"] = reg
+        region_data["resources"].extend(sg_resources)
+        region_data["security_groups"] = len([r for r in sg_resources if "error" not in r])
+
+        rds = self.scan_rds_instances(region=reg)
+        region_data["resources"].extend(rds)
+        region_data["rds_instances"] = len([r for r in rds if "error" not in r])
+
+        lambdas = self.scan_lambda_functions(region=reg)
+        region_data["resources"].extend(lambdas)
+        region_data["lambda_functions"] = len([r for r in lambdas if "error" not in r])
+
+        events = self.fetch_cloudtrail_events(region=reg)
+        for e in events:
+            if "error" not in e:
+                e["region"] = reg
+        region_data["events"].extend(events)
+        region_data["cloudtrail_events"] = len([e for e in events if "error" not in e])
+
+        return region_data
+
     def run_full_scan(self, regions: Optional[List[str]] = None) -> Dict[str, Any]:
         """Run a complete scan of all supported AWS resource types across multiple regions."""
+        # Default to primary region only for speed; pass explicit list to scan more
         if regions == ["all"] or not regions:
-            scan_regions = self.get_available_regions()
+            scan_regions = [self.region]
         else:
-            scan_regions = regions or [self.region]
+            scan_regions = regions
 
         results = {
             "scan_time": datetime.now(timezone.utc).isoformat(),
@@ -566,59 +613,37 @@ class AWSScanner:
             },
         }
 
-        # 1. Global Services (Scan Once)
-        # S3 Buckets
-        s3_resources = self.scan_s3_buckets()
+        # 1. Global Services — run in parallel
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            fut_s3 = executor.submit(self.scan_s3_buckets)
+            fut_iam = executor.submit(self.scan_iam_policies)
+            fut_users = executor.submit(self.scan_iam_users)
+
+            s3_resources = fut_s3.result()
+            iam_resources = fut_iam.result()
+            user_resources = fut_users.result()
+
         results["resources"].extend(s3_resources)
         results["summary"]["s3_buckets"] = len([r for r in s3_resources if "error" not in r])
-
-        # IAM Policies
-        iam_resources = self.scan_iam_policies()
         results["resources"].extend(iam_resources)
         results["summary"]["iam_policies"] = len([r for r in iam_resources if "error" not in r])
-
-        # IAM Users
-        user_resources = self.scan_iam_users()
         results["resources"].extend(user_resources)
         results["summary"]["iam_users"] = len([r for r in user_resources if "error" not in r])
 
-        # 2. Regional Services (Loop through regions)
-        for reg in scan_regions:
-            # Full Inventory Discovery (Captured first to avoid missing "unsupported" types)
-            inventory = self.scan_all_resources(region=reg)
-            results["resources"].extend(inventory)
-            
-            # Specific Scanners (Provide more detail for key types)
-            instances = self.scan_ec2_instances(region=reg)
-            results["resources"].extend(instances)
-            results["summary"]["ec2_instances"] += len([r for r in instances if "error" not in r])
-
-            vpcs = self.scan_vpcs(region=reg)
-            results["resources"].extend(vpcs)
-            results["summary"]["vpcs"] += len([r for r in vpcs if "error" not in r])
-
-            sg_resources = self.scan_security_groups(region=reg)
-            for r in sg_resources:
-                if "error" not in r:
-                    r["region"] = reg
-            results["resources"].extend(sg_resources)
-            results["summary"]["security_groups"] += len([r for r in sg_resources if "error" not in r])
-
-            rds = self.scan_rds_instances(region=reg)
-            results["resources"].extend(rds)
-            results["summary"]["rds_instances"] += len([r for r in rds if "error" not in r])
-
-            lambdas = self.scan_lambda_functions(region=reg)
-            results["resources"].extend(lambdas)
-            results["summary"]["lambda_functions"] += len([r for r in lambdas if "error" not in r])
-
-            # CloudTrail Events
-            events = self.fetch_cloudtrail_events(region=reg)
-            for e in events:
-                if "error" not in e:
-                    e["region"] = reg
-            results["events"].extend(events)
-            results["summary"]["cloudtrail_events"] += len([e for e in events if "error" not in e])
+        # 2. Regional Services — scan all regions in parallel (max 8 workers)
+        max_workers = min(8, len(scan_regions))
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_region = {executor.submit(self._scan_region, reg): reg for reg in scan_regions}
+            for future in as_completed(future_to_region):
+                region_data = future.result()
+                results["resources"].extend(region_data["resources"])
+                results["events"].extend(region_data["events"])
+                results["summary"]["ec2_instances"] += region_data["ec2_instances"]
+                results["summary"]["vpcs"] += region_data["vpcs"]
+                results["summary"]["security_groups"] += region_data["security_groups"]
+                results["summary"]["rds_instances"] += region_data["rds_instances"]
+                results["summary"]["lambda_functions"] += region_data["lambda_functions"]
+                results["summary"]["cloudtrail_events"] += region_data["cloudtrail_events"]
 
         # 3. Deduping and Cleanup
         # Remove duplicates based on resource_id (keeping the richest metadata version)
