@@ -12,8 +12,7 @@ export default function Sidebar({ activeTab = "dashboard", onTabChange }) {
     { icon: "radar",     label: "Monitoring", key: "monitoring" },
     { icon: "topology",  label: "Topology",   key: "topology" },
     { icon: "shield",    label: "Audits",    key: "audits" },
-    { icon: "chart-line",label: "Trends",    key: "trends" },
-    { icon: "bell",      label: "Drift Alerts", key: "drift" },
+{ icon: "bell",      label: "Drift Alerts", key: "drift" },
     { icon: "clipboard", label: "Compliance Rules", key: "rules" },
     { icon: "gear",      label: "Settings",  key: "settings" },
   ];
