@@ -9,6 +9,7 @@ export default function MonitoringView({ onNavigate }) {
   const [awsStatus, setAwsStatus] = useState(null);
   const [azureStatus, setAzureStatus] = useState(null);
   const [gcpStatus, setGcpStatus] = useState(null);
+  const [containerStatus, setContainerStatus] = useState(null);
   const [selectedCloud, setSelectedCloud] = useState("aws");
   
   const [scanning, setScanning] = useState(false);
@@ -27,13 +28,18 @@ export default function MonitoringView({ onNavigate }) {
   useEffect(() => {
     checkCloudStatuses();
     loadCachedResults();
+    loadContainerCache();
   }, []);
 
   useEffect(() => {
     if (selectedCloud === "aws" && awsStatus?.connected) {
       fetchRegions();
     }
-    loadCachedResults();
+    if (selectedCloud === "container") {
+      loadContainerCache();
+    } else {
+      loadCachedResults();
+    }
   }, [selectedCloud, awsStatus]);
 
   const fetchRegions = async () => {
@@ -83,11 +89,33 @@ export default function MonitoringView({ onNavigate }) {
     } catch {}
   };
 
+  const loadContainerCache = async () => {
+    try {
+      const res = await fetch(`${API}/api/container/scan/latest`);
+      const data = await res.json();
+      if (data.cached) {
+        setContainerStatus({ available: true });
+        setScanResults(data);
+      } else {
+        setContainerStatus({ available: false });
+      }
+    } catch {
+      setContainerStatus({ available: false });
+    }
+  };
+
   const handleScan = async () => {
     setScanning(true);
     try {
-      const body = selectedCloud === "aws" ? { regions: selectedRegions.length ? selectedRegions : null } : {};
-      const res = await fetch(`${API}/api/${selectedCloud}/scan`, {
+      let url, body;
+      if (selectedCloud === "container") {
+        url = `${API}/api/container/scan`;
+        body = {};
+      } else {
+        url = `${API}/api/${selectedCloud}/scan`;
+        body = selectedCloud === "aws" ? { regions: selectedRegions.length ? selectedRegions : null } : {};
+      }
+      const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body)
@@ -118,7 +146,10 @@ export default function MonitoringView({ onNavigate }) {
     setDownloading(format);
     try {
       const frameworkParam = reportFramework !== "All" ? `&framework=${reportFramework}` : "";
-      const res = await fetch(`${API}/api/${selectedCloud}/scan/report?format=${format}${frameworkParam}`);
+      const reportEndpoint = selectedCloud === "container"
+        ? `${API}/api/container/scan/report?format=${format}${frameworkParam}`
+        : `${API}/api/${selectedCloud}/scan/report?format=${format}${frameworkParam}`;
+      const res = await fetch(reportEndpoint);
       if (!res.ok) { alert("Report download failed — run a scan first."); return; }
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
@@ -138,8 +169,10 @@ export default function MonitoringView({ onNavigate }) {
 
   const handleDisconnect = async () => {
     try {
-      await fetch(`${API}/api/${selectedCloud}/disconnect`, { method: "POST" });
-      checkCloudStatuses();
+      if (selectedCloud !== "container") {
+        await fetch(`${API}/api/${selectedCloud}/disconnect`, { method: "POST" });
+        checkCloudStatuses();
+      }
       setScanResults(null);
       setEvents([]);
     } catch {}
@@ -149,47 +182,34 @@ export default function MonitoringView({ onNavigate }) {
     if (cloud === "aws") return awsStatus?.connected;
     if (cloud === "azure") return azureStatus?.connected;
     if (cloud === "gcp") return gcpStatus?.connected;
+    if (cloud === "container") return true; // Container tab is always available
     return false;
   };
 
-  const anyConnected = awsStatus?.connected || azureStatus?.connected || gcpStatus?.connected;
+  const anyConnected = awsStatus?.connected || azureStatus?.connected || gcpStatus?.connected || true; // container always available
 
-  if (!anyConnected && awsStatus !== null) {
-    return (
-      <div className="animate-fade-in">
-        <div className="page-header">
-          <h2>Monitoring</h2>
-          <p>Real-time infrastructure monitoring and CIS compliance scanning.</p>
-        </div>
-        <div className="glass-card" style={{ maxWidth: 650, margin: "40px auto", padding: 48, textAlign: "center" }}>
-          <div style={{ display: "flex", justifyContent: "center", gap: 24, marginBottom: 32 }}>
-            <div style={{ padding: 16, background: "rgba(0,0,0,0.05)", borderRadius: 16 }}><img src="/logos/aws.svg" alt="AWS" style={{ width: 48, height: 48 }} /></div>
-            <div style={{ padding: 16, background: "rgba(0,0,0,0.05)", borderRadius: 16 }}><img src="/logos/azure.svg" alt="Azure" style={{ width: 48, height: 48 }} /></div>
-            <div style={{ padding: 16, background: "rgba(0,0,0,0.05)", borderRadius: 16 }}><img src="/logos/gcp.svg" alt="GCP" style={{ width: 48, height: 48 }} /></div>
-          </div>
-          <h3>No Cloud Accounts Connected</h3>
-          <p style={{ color: "var(--text-secondary)", marginBottom: 24 }}>Connect your accounts to enable live infrastructure monitoring.</p>
-          <button className="save-btn" onClick={() => onNavigate && onNavigate("connect")} style={{ padding: "12px 32px", display: "inline-flex", alignItems: "center", gap: 8 }}>
-            <Icon name="cloud-plus" size={18} /> Go to Connect
-          </button>
-        </div>
-      </div>
-    );
+  // Container tab is always available — only show "no connection" screen if no cloud is connected AND not on container tab
+  if (!awsStatus?.connected && !azureStatus?.connected && !gcpStatus?.connected && awsStatus !== null && selectedCloud !== "container") {
+    // Auto-switch to container tab since it's always available
+    if (selectedCloud !== "container") {
+      // Keep rendering but switch to container silently via effect — show connect prompt with container option
+    }
   }
 
-  const currentStatus = selectedCloud === "aws" ? awsStatus : selectedCloud === "azure" ? azureStatus : gcpStatus;
-  const cloudLogo = selectedCloud === "aws" ? "/logos/aws.svg" : selectedCloud === "azure" ? "/logos/azure.svg" : "/logos/gcp.svg";
+  const currentStatus = selectedCloud === "aws" ? awsStatus : selectedCloud === "azure" ? azureStatus : selectedCloud === "gcp" ? gcpStatus : { connected: true };
+  const cloudLogo = selectedCloud === "aws" ? "/logos/aws.svg" : selectedCloud === "azure" ? "/logos/azure.svg" : selectedCloud === "gcp" ? "/logos/gcp.svg" : null;
   const audit = scanResults?.audit;
   const metrics = scanResults?.scan || {};
+  // For container scans, findings come from audit.findings (the combined list)
   const findings = audit?.findings || [];
-  const healthScore = audit?.health_score ?? 0;
+  const healthScore = audit?.health_score ?? audit?.summary?.health_score ?? 0;
 
   const getSeverityColor = (severity) => ({ CRITICAL: "#ef4444", HIGH: "#f97316", MEDIUM: "#eab308", LOW: "#3b82f6" }[severity] || "#6b7280");
 
   return (
     <div className="animate-fade-in">
       {/* Cloud Selector */}
-      <div style={{ display: "flex", gap: 12, marginBottom: 24, padding: "8px 0", borderBottom: "1px solid var(--border-color)" }}>
+      <div style={{ display: "flex", gap: 12, marginBottom: 24, padding: "8px 0", borderBottom: "1px solid var(--border-color)", flexWrap: "wrap" }}>
         {["aws", "azure", "gcp"].map(id => (
           <button
             key={id}
@@ -208,24 +228,51 @@ export default function MonitoringView({ onNavigate }) {
             <span style={{ fontWeight: 600, color: selectedCloud === id ? "var(--text-primary)" : "var(--text-secondary)", textTransform: "uppercase" }}>{id}</span>
           </button>
         ))}
+        {/* Container tab — always enabled */}
+        <button
+          onClick={() => setSelectedCloud("container")}
+          style={{
+            display: "flex", alignItems: "center", gap: 10, padding: "10px 20px", borderRadius: 12,
+            background: selectedCloud === "container" ? "var(--bg-tertiary)" : "transparent",
+            border: selectedCloud === "container" ? "1px solid var(--accent-primary)" : "1px solid transparent",
+            opacity: 1,
+            cursor: "pointer",
+            transition: "all 0.2s ease"
+          }}
+        >
+          <Icon name="box" size={20} style={{ color: selectedCloud === "container" ? "var(--accent-primary)" : "var(--text-secondary)" }} />
+          <span style={{ fontWeight: 600, color: selectedCloud === "container" ? "var(--text-primary)" : "var(--text-secondary)", textTransform: "uppercase" }}>Container</span>
+        </button>
       </div>
 
       {/* ── Page header ── */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 }}>
         <div>
           <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 4 }}>
-            <img src={cloudLogo} alt="" style={{ width: 32, height: 32 }} />
-            <h2 style={{ margin: 0 }}>{selectedCloud.toUpperCase()} Monitoring</h2>
+            {cloudLogo
+              ? <img src={cloudLogo} alt="" style={{ width: 32, height: 32 }} />
+              : <Icon name="box" size={32} style={{ color: "var(--accent-primary)" }} />
+            }
+            <h2 style={{ margin: 0 }}>
+              {selectedCloud === "container" ? "Container Security Monitoring" : `${selectedCloud.toUpperCase()} Monitoring`}
+            </h2>
           </div>
-          <p style={{ margin: 0, fontSize: 13, color: "var(--text-secondary)" }}>
-            Managing compliance for <strong>{selectedCloud === "aws" ? currentStatus?.user : currentStatus?.project_id || currentStatus?.tenant_id}</strong>
-            <span style={{ color: "#22c55e", marginLeft: 10, fontWeight: 600 }}>● Connected</span>
-          </p>
+          {selectedCloud === "container" ? (
+            <p style={{ margin: 0, fontSize: 13, color: "var(--text-secondary)" }}>
+              Local Docker and Kubernetes security auditing against CIS Docker Benchmark v1.6 and CIS Kubernetes Benchmark v1.8
+              <span style={{ color: "#22c55e", marginLeft: 10, fontWeight: 600 }}>● Local</span>
+            </p>
+          ) : (
+            <p style={{ margin: 0, fontSize: 13, color: "var(--text-secondary)" }}>
+              Managing compliance for <strong>{selectedCloud === "aws" ? currentStatus?.user : currentStatus?.project_id || currentStatus?.tenant_id}</strong>
+              <span style={{ color: "#22c55e", marginLeft: 10, fontWeight: 600 }}>● Connected</span>
+            </p>
+          )}
         </div>
 
         {/* Right action buttons — scan + region + disconnect */}
         <div style={{ display: "flex", gap: 10, alignItems: "center", position: "relative" }}>
-          {selectedCloud === "aws" && (
+          {selectedCloud === "aws" && !scanning && (
             <div style={{ position: "relative" }}>
               <button
                 onClick={() => setShowRegionFilter(!showRegionFilter)}
@@ -304,12 +351,14 @@ export default function MonitoringView({ onNavigate }) {
           <button className="save-btn" onClick={handleScan} disabled={scanning} style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 20px" }}>
             {scanning ? <><span className="spinner"></span> Scanning…</> : <><Icon name="refresh" size={16} /> Run Live Scan</>}
           </button>
-          <button
-            onClick={handleDisconnect}
-            style={{ padding: "9px 16px", background: "rgba(220,53,69,0.08)", color: "#dc3545", border: "1px solid rgba(220,53,69,0.25)", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: "pointer" }}
-          >
-            Disconnect
-          </button>
+          {selectedCloud !== "container" && (
+            <button
+              onClick={handleDisconnect}
+              style={{ padding: "9px 16px", background: "rgba(220,53,69,0.08)", color: "#dc3545", border: "1px solid rgba(220,53,69,0.25)", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: "pointer" }}
+            >
+              Disconnect
+            </button>
+          )}
         </div>
       </div>
 
@@ -400,7 +449,7 @@ export default function MonitoringView({ onNavigate }) {
         ))}
       </div>
 
-      {!scanResults && !scanning && activeTab !== "activity" && (
+      {!scanResults && !scanning && activeTab !== "activity" && selectedCloud !== "container" && (
         <div className="glass-card" style={{ padding: 64, textAlign: "center" }}>
           <div style={{ width: 80, height: 80, borderRadius: 20, background: "rgba(var(--accent-primary-rgb), 0.1)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 24px" }}>
             <Icon name="search" size={40} style={{ color: "var(--accent-primary)" }} />
@@ -410,6 +459,24 @@ export default function MonitoringView({ onNavigate }) {
             Run a live scan to analyze your {selectedCloud.toUpperCase()} resources against CIS Level 1 benchmarks.
           </p>
           <button className="save-btn" onClick={handleScan} style={{ padding: "14px 40px", fontSize: 16 }}>Start Initial Scan</button>
+        </div>
+      )}
+
+      {!scanResults && !scanning && selectedCloud === "container" && (
+        <div className="glass-card" style={{ padding: 64, textAlign: "center" }}>
+          <div style={{ width: 80, height: 80, borderRadius: 20, background: "rgba(var(--accent-primary-rgb), 0.1)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 24px" }}>
+            <Icon name="box" size={40} style={{ color: "var(--accent-primary)" }} />
+          </div>
+          <h3 style={{ fontSize: 24, marginBottom: 12 }}>Container Security Audit</h3>
+          <p style={{ color: "var(--text-secondary)", maxWidth: 500, margin: "0 auto 12px", fontSize: 15, lineHeight: 1.6 }}>
+            Scan your local Docker containers and Kubernetes cluster against CIS Docker Benchmark v1.6 and CIS Kubernetes Benchmark v1.8.
+          </p>
+          <p style={{ color: "var(--text-muted)", maxWidth: 480, margin: "0 auto 32px", fontSize: 13, lineHeight: 1.5 }}>
+            No cloud credentials required. Runs docker and kubectl CLI commands locally.
+          </p>
+          <button className="save-btn" onClick={handleScan} style={{ padding: "14px 40px", fontSize: 16, display: "inline-flex", alignItems: "center", gap: 10 }}>
+            <Icon name="box" size={18} /> Start Container Scan
+          </button>
         </div>
       )}
 
@@ -492,7 +559,7 @@ export default function MonitoringView({ onNavigate }) {
         </div>
       )}
 
-      {activeTab === "compliance" && scanResults && (
+      {activeTab === "compliance" && scanResults && selectedCloud !== "container" && (
         <div className="animate-fade-in" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
             {["all", "fail", "pass"].map(f => (
@@ -506,7 +573,7 @@ export default function MonitoringView({ onNavigate }) {
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
                 <div>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-                    <span style={{ fontSize: 12, fontWeight: 800, color: "var(--text-muted)" }}>{f.cis_rule_id}</span>
+                    <span style={{ fontSize: 12, fontWeight: 800, color: "var(--text-muted)" }}>{f.cis_rule_id || f.rule_id}</span>
                     <span style={{ fontSize: 11, fontWeight: 800, padding: "2px 8px", borderRadius: 4, background: f.status === "FAIL" ? "rgba(239,68,68,0.1)" : "rgba(34,197,94,0.1)", color: f.status === "FAIL" ? "#ef4444" : "#22c55e" }}>{f.status}</span>
                     <span style={{ fontSize: 11, fontWeight: 800, color: getSeverityColor(f.severity) }}>{f.severity}</span>
                   </div>
@@ -523,6 +590,119 @@ export default function MonitoringView({ onNavigate }) {
               )}
             </div>
           ))}
+        </div>
+      )}
+
+      {/* ── Container-specific compliance view ── */}
+      {selectedCloud === "container" && scanResults && (
+        <div className="animate-fade-in" style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+          {/* Container availability indicators */}
+          <div style={{ display: "flex", gap: 16, marginBottom: 8 }}>
+            <div className="glass-card" style={{ padding: "12px 20px", display: "flex", alignItems: "center", gap: 10 }}>
+              <span style={{ width: 10, height: 10, borderRadius: "50%", background: scanResults.docker_available ? "#22c55e" : "#ef4444", display: "inline-block" }} />
+              <span style={{ fontWeight: 600, fontSize: 13 }}>Docker</span>
+              <span style={{ fontSize: 12, color: "var(--text-muted)" }}>{scanResults.docker_available ? "Available" : scanResults.docker_error || "Not running"}</span>
+            </div>
+            <div className="glass-card" style={{ padding: "12px 20px", display: "flex", alignItems: "center", gap: 10 }}>
+              <span style={{ width: 10, height: 10, borderRadius: "50%", background: scanResults.k8s_available ? "#22c55e" : "#ef4444", display: "inline-block" }} />
+              <span style={{ fontWeight: 600, fontSize: 13 }}>Kubernetes</span>
+              <span style={{ fontSize: 12, color: "var(--text-muted)" }}>{scanResults.k8s_available ? "Available" : scanResults.k8s_error || "Not configured"}</span>
+            </div>
+          </div>
+
+          {/* Filter bar */}
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            {["all", "fail", "pass"].map(f => (
+              <button key={f} onClick={() => setActiveFilter(f)} style={{ padding: "6px 16px", borderRadius: 8, fontSize: 13, fontWeight: 600, border: "none", cursor: "pointer", background: activeFilter === f ? "var(--accent-primary)" : "var(--bg-tertiary)", color: activeFilter === f ? "#fff" : "var(--text-secondary)", textTransform: "uppercase" }}>
+                {f}
+              </button>
+            ))}
+          </div>
+
+          {/* Docker Findings Group */}
+          {scanResults.audit?.docker_findings?.length > 0 && (
+            <div>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+                <Icon name="box" size={18} style={{ color: "var(--accent-primary)" }} />
+                <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>Docker Findings</h3>
+                <span style={{ fontSize: 12, color: "var(--text-muted)" }}>CIS Docker Benchmark v1.6</span>
+                <span style={{ fontSize: 12, fontWeight: 700, color: "#ef4444", background: "rgba(239,68,68,0.08)", padding: "2px 10px", borderRadius: 20 }}>
+                  {scanResults.audit.docker_findings.filter(f => f.status === "FAIL").length} FAIL
+                </span>
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                {scanResults.audit.docker_findings
+                  .filter(f => activeFilter === "all" || f.status === activeFilter.toUpperCase())
+                  .map((f, i) => (
+                    <div key={i} className="glass-card" style={{ padding: 18, borderLeft: `4px solid ${f.status === "FAIL" ? getSeverityColor(f.severity) : "#22c55e"}` }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <span style={{ fontSize: 11, fontWeight: 800, color: "var(--text-muted)", fontFamily: "monospace" }}>{f.rule_id}</span>
+                          <span style={{ fontSize: 11, fontWeight: 800, padding: "2px 8px", borderRadius: 4, background: f.status === "FAIL" ? "rgba(239,68,68,0.1)" : "rgba(34,197,94,0.1)", color: f.status === "FAIL" ? "#ef4444" : "#22c55e" }}>{f.status}</span>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: getSeverityColor(f.severity) }}>{f.severity}</span>
+                        </div>
+                        <span style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 600 }}>{f.resource_name}</span>
+                      </div>
+                      <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 6 }}>{f.title}</div>
+                      <p style={{ fontSize: 13, color: "var(--text-secondary)", margin: 0, lineHeight: 1.5 }}>{f.description}</p>
+                      {f.status === "FAIL" && f.remediation_step && (
+                        <div style={{ marginTop: 12, background: "rgba(0,0,0,0.03)", padding: 10, borderRadius: 8, fontSize: 11, fontFamily: "monospace" }}>
+                          <span style={{ fontWeight: 700, color: "var(--text-muted)" }}>Fix: </span>{f.remediation_step}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+              </div>
+            </div>
+          )}
+
+          {/* Kubernetes Findings Group */}
+          {scanResults.audit?.k8s_findings?.length > 0 && (
+            <div>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+                <Icon name="cloud" size={18} style={{ color: "#3b82f6" }} />
+                <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>Kubernetes Findings</h3>
+                <span style={{ fontSize: 12, color: "var(--text-muted)" }}>CIS Kubernetes Benchmark v1.8</span>
+                <span style={{ fontSize: 12, fontWeight: 700, color: "#ef4444", background: "rgba(239,68,68,0.08)", padding: "2px 10px", borderRadius: 20 }}>
+                  {scanResults.audit.k8s_findings.filter(f => f.status === "FAIL").length} FAIL
+                </span>
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                {scanResults.audit.k8s_findings
+                  .filter(f => activeFilter === "all" || f.status === activeFilter.toUpperCase())
+                  .map((f, i) => (
+                    <div key={i} className="glass-card" style={{ padding: 18, borderLeft: `4px solid ${f.status === "FAIL" ? getSeverityColor(f.severity) : "#22c55e"}` }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <span style={{ fontSize: 11, fontWeight: 800, color: "var(--text-muted)", fontFamily: "monospace" }}>{f.rule_id}</span>
+                          <span style={{ fontSize: 11, fontWeight: 800, padding: "2px 8px", borderRadius: 4, background: f.status === "FAIL" ? "rgba(239,68,68,0.1)" : "rgba(34,197,94,0.1)", color: f.status === "FAIL" ? "#ef4444" : "#22c55e" }}>{f.status}</span>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: getSeverityColor(f.severity) }}>{f.severity}</span>
+                        </div>
+                        <span style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 600 }}>{f.resource_name}</span>
+                      </div>
+                      <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 6 }}>{f.title}</div>
+                      <p style={{ fontSize: 13, color: "var(--text-secondary)", margin: 0, lineHeight: 1.5 }}>{f.description}</p>
+                      {f.status === "FAIL" && f.remediation_step && (
+                        <div style={{ marginTop: 12, background: "rgba(0,0,0,0.03)", padding: 10, borderRadius: 8, fontSize: 11, fontFamily: "monospace" }}>
+                          <span style={{ fontWeight: 700, color: "var(--text-muted)" }}>Fix: </span>{f.remediation_step}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+              </div>
+            </div>
+          )}
+
+          {/* Empty state when no container runtime available */}
+          {!scanResults.docker_available && !scanResults.k8s_available && (
+            <div className="glass-card" style={{ padding: 48, textAlign: "center" }}>
+              <Icon name="box" size={48} style={{ color: "var(--text-muted)", margin: "0 auto 16px" }} />
+              <h3>No Container Runtime Detected</h3>
+              <p style={{ color: "var(--text-secondary)", maxWidth: 420, margin: "0 auto" }}>
+                Docker is not running and kubectl cannot reach a cluster. Start Docker Desktop or configure kubectl to run container security audits.
+              </p>
+            </div>
+          )}
         </div>
       )}
 

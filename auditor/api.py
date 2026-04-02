@@ -32,6 +32,7 @@ _GCP_CREDS_FILE = _DATA_DIR / "gcp_credentials.json"
 _AWS_SCAN_CACHE_FILE = _DATA_DIR / "aws_scan_cache.json"
 _AZURE_SCAN_CACHE_FILE = _DATA_DIR / "azure_scan_cache.json"
 _GCP_SCAN_CACHE_FILE = _DATA_DIR / "gcp_scan_cache.json"
+_CONTAINER_SCAN_CACHE_FILE = _DATA_DIR / "container_scan_cache.json"
 
 import logging
 logger = logging.getLogger(__name__)
@@ -39,6 +40,7 @@ logger = logging.getLogger(__name__)
 _aws_scan_cache = {}
 _azure_scan_cache = None
 _gcp_scan_cache = None
+_container_scan_cache = {}
 
 from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect, BackgroundTasks
 from fastapi.responses import StreamingResponse
@@ -67,6 +69,18 @@ from .azure_scanner import AzureScanner
 from .azure_auditor import audit_azure_resources
 from .gcp_scanner import GCPScanner
 from .gcp_auditor import audit_gcp_resources
+try:
+    from .container_auditor import ContainerAuditor
+except ImportError:
+    ContainerAuditor = None
+try:
+    from .nist_auditor import audit_aws_resources_nist
+except ImportError:
+    audit_aws_resources_nist = None
+try:
+    from .ccm_auditor import audit_aws_resources_ccm
+except ImportError:
+    audit_aws_resources_ccm = None
 
 
 # ─── WebSocket Broadcast Manager ──────────────────────────────────────────────
@@ -123,7 +137,7 @@ def get_aws_regions():
 @app.on_event("startup")
 def startup():
     """Initialize the database and restore persisted state on startup."""
-    global _aws_scan_cache, _azure_scan_cache, _gcp_scan_cache
+    global _aws_scan_cache, _azure_scan_cache, _gcp_scan_cache, _container_scan_cache
     init_db()
     _load_aws_credentials()
     _load_azure_credentials()
@@ -131,6 +145,7 @@ def startup():
     _aws_scan_cache = _load_scan_cache("aws")
     _azure_scan_cache = _load_scan_cache("azure")
     _gcp_scan_cache = _load_scan_cache("gcp")
+    _container_scan_cache = _load_scan_cache("container")
 
 
 # ─── Request/Response Models ─────────────────────────────────────────────────
@@ -630,7 +645,8 @@ def _save_scan_cache(data: dict, provider: str = "aws"):
     cache_file = _AWS_SCAN_CACHE_FILE
     if provider == "azure": cache_file = _AZURE_SCAN_CACHE_FILE
     elif provider == "gcp": cache_file = _GCP_SCAN_CACHE_FILE
-    
+    elif provider == "container": cache_file = _CONTAINER_SCAN_CACHE_FILE
+
     try:
         cache_file.write_text(json.dumps(data, default=str))
     except Exception:
@@ -642,7 +658,8 @@ def _load_scan_cache(provider: str = "aws") -> dict:
     cache_file = _AWS_SCAN_CACHE_FILE
     if provider == "azure": cache_file = _AZURE_SCAN_CACHE_FILE
     elif provider == "gcp": cache_file = _GCP_SCAN_CACHE_FILE
-    
+    elif provider == "container": cache_file = _CONTAINER_SCAN_CACHE_FILE
+
     if cache_file.exists():
         try:
             return json.loads(cache_file.read_text())
@@ -917,6 +934,142 @@ def get_latest_gcp_scan():
     return {"cached": True, **_gcp_scan_cache}
 
 
+# ─── Container (Docker / Kubernetes) Endpoints ───────────────────────────────
+
+@app.post("/api/container/scan")
+async def run_container_scan():
+    """Run a full Docker and Kubernetes security scan using CIS Benchmarks."""
+    global _container_scan_cache
+
+    if ContainerAuditor is None:
+        raise HTTPException(status_code=500, detail="ContainerAuditor module is not available.")
+
+    auditor = ContainerAuditor()
+    result = auditor.run_full_scan()
+
+    _container_scan_cache = result
+    _save_scan_cache(result, "container")
+
+    await manager.broadcast({
+        "type": "RESOURCE_UPDATED",
+        "provider": "container",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    })
+
+    return result
+
+
+@app.get("/api/container/scan/latest")
+def get_latest_container_scan():
+    """Get the most recent Container scan results from cache."""
+    if not _container_scan_cache:
+        return {"cached": False, "message": "No container scan results available. Run a scan first."}
+    return {"cached": True, **_container_scan_cache}
+
+
+@app.get("/api/container/scan/report")
+def download_container_report(
+    format: str = Query("pdf", pattern="^(pdf|csv|json)$"),
+    framework: str = Query("All", pattern="^(All|CIS|NIST|CCM)$"),
+):
+    """Download the latest Container scan report as PDF, CSV, or JSON."""
+    if not _container_scan_cache:
+        raise HTTPException(status_code=404, detail="No container scan results. Run a scan first.")
+
+    audit_data = _container_scan_cache.get("audit", {})
+    all_findings = audit_data.get("findings", [])
+
+    # Container reports always use CIS framework; NIST/CCM fall back to all findings
+    if framework == "CIS":
+        findings_list = [f for f in all_findings if str(f.get("framework", "CIS")).upper() == "CIS"]
+    elif framework in ("NIST", "CCM"):
+        # Container checks are CIS-based; for NIST/CCM return all findings with framework label
+        findings_list = all_findings
+    else:
+        findings_list = all_findings
+
+    scan_time = _container_scan_cache.get("scan_time", "")
+    fw_suffix = f"-{framework.lower()}" if framework != "All" else ""
+    fw_label = f" ({framework} Framework)" if framework != "All" else ""
+
+    scan_meta = {
+        "scan_time": scan_time,
+        "docker_available": _container_scan_cache.get("docker_available", False),
+        "k8s_available": _container_scan_cache.get("k8s_available", False),
+        "total_resources": _container_scan_cache.get("scan", {}).get("total_resources", 0),
+        "framework": framework,
+    }
+
+    if format == "json":
+        total = len(findings_list)
+        passed = sum(1 for f in findings_list if f.get("status") == "PASS")
+        failed = total - passed
+        score = round((passed / total) * 100, 1) if total > 0 else 0.0
+        report = {
+            "report_title": f"Cloud Compliance Guardian — Container Security Audit{fw_label}",
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "framework_filter": framework,
+            "scan_summary": scan_meta,
+            "health_score": audit_data.get("health_score", 0),
+            "total_checks": total,
+            "passed": passed,
+            "failed": failed,
+            "compliance_score": score,
+            "findings": findings_list,
+        }
+        content = json.dumps(report, indent=2, default=str)
+        return StreamingResponse(
+            io.BytesIO(content.encode()),
+            media_type="application/json",
+            headers={"Content-Disposition": f"attachment; filename=container-audit-report{fw_suffix}.json"},
+        )
+
+    if format == "csv":
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow([
+            "Status", "Severity", "Rule ID", "Title", "Resource",
+            "Resource Type", "Framework", "Description", "Reasoning",
+            "Expected", "Actual", "Recommendation", "Remediation",
+        ])
+        for f in findings_list:
+            writer.writerow([
+                f.get("status", ""), f.get("severity", ""),
+                f.get("rule_id", f.get("cis_rule_id", "")),
+                f.get("title", ""),
+                f.get("resource_name", ""),
+                f.get("resource_type", ""), f.get("framework", "CIS"),
+                f.get("description", ""), f.get("reasoning", ""),
+                f.get("expected", ""), f.get("actual", ""),
+                f.get("recommendation", ""), f.get("remediation_step", ""),
+            ])
+        content = output.getvalue()
+        return StreamingResponse(
+            io.BytesIO(content.encode()),
+            media_type="text/csv",
+            headers={"Content-Disposition": f"attachment; filename=container-audit-report{fw_suffix}.csv"},
+        )
+
+    # PDF — build a compatible scan cache dict for the existing PDF generator
+    from .report_generator import generate_aws_pdf_report
+    pdf_cache = {
+        "scan": scan_meta,
+        "scan_time": scan_time,
+        "regions_scanned": ["local"],
+        "primary_region": "local",
+        "resources": _container_scan_cache.get("resources", []),
+        "audit": {**audit_data, "findings": findings_list},
+        "framework_label": fw_label,
+        "framework": framework,
+    }
+    pdf_bytes = generate_aws_pdf_report(pdf_cache)
+    return StreamingResponse(
+        io.BytesIO(pdf_bytes),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename=container-audit-report{fw_suffix}.pdf"},
+    )
+
+
 # ─── Topology Endpoints ───────────────────────────────────────────────────────
 
 @app.websocket("/api/ws/topology")
@@ -1132,9 +1285,20 @@ def download_aws_report(
     audit = _aws_scan_cache.get("audit", {})
     scan = _aws_scan_cache.get("scan", {})
     all_findings = audit.get("findings", [])
-    findings_list = _filter_findings_by_framework(all_findings, framework)
     region = _aws_scan_cache.get("region", "unknown")
     scan_time = _aws_scan_cache.get("scan_time", "")
+
+    # For NIST and CCM, run the dedicated auditors against the raw resources
+    if framework == "NIST" and audit_aws_resources_nist is not None:
+        nist_result = audit_aws_resources_nist({"resources": _aws_scan_cache.get("resources", [])})
+        findings_list = nist_result["findings"]
+    elif framework == "CCM" and audit_aws_resources_ccm is not None:
+        ccm_result = audit_aws_resources_ccm({"resources": _aws_scan_cache.get("resources", [])})
+        findings_list = ccm_result["findings"]
+    elif framework == "CIS":
+        findings_list = [f for f in all_findings if not str(f.get("cis_rule_id", "")).startswith("NIST")]
+    else:
+        findings_list = _filter_findings_by_framework(all_findings, framework)
 
     fw_suffix = f"-{framework.lower()}" if framework != "All" else ""
     fw_label = f" ({framework} Framework)" if framework != "All" else ""
