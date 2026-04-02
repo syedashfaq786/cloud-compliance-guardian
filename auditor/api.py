@@ -301,9 +301,35 @@ def trigger_scan(request: ScanRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def _filter_findings_by_framework(findings_data: list, framework: str) -> list:
+    """Filter findings to only those matching the given compliance framework.
+    CIS rules have IDs like 'CIS 1.4', 'CIS-AZ 1.1.1', 'CIS-GCP 3.1'.
+    NIST rules have IDs like 'NIST AC-2', 'NIST AU-3', etc.
+    If framework is 'All', return all findings unchanged.
+    """
+    if not framework or framework == "All":
+        return findings_data
+    framework_upper = framework.upper()
+    filtered = []
+    for f in findings_data:
+        rule_id = (f.get("rule_id") or f.get("cis_rule_id") or "").upper()
+        framework_field = (f.get("framework") or "").upper()
+        if framework_field == framework_upper:
+            filtered.append(f)
+        elif framework_upper == "CIS" and (rule_id.startswith("CIS") or framework_field == "CIS"):
+            filtered.append(f)
+        elif framework_upper == "NIST" and (rule_id.startswith("NIST") or framework_field == "NIST"):
+            filtered.append(f)
+    return filtered
+
+
 @app.get("/api/audits/{audit_id}/report")
-def download_audit_report(audit_id: str, format: str = Query("pdf", pattern="^(pdf|csv|json)$")):
-    """Download an audit report as PDF, CSV, or JSON."""
+def download_audit_report(
+    audit_id: str,
+    format: str = Query("pdf", pattern="^(pdf|csv|json)$"),
+    framework: str = Query("All", pattern="^(All|CIS|NIST)$"),
+):
+    """Download an audit report as PDF, CSV, or JSON, optionally filtered by compliance framework."""
     session = get_session()
     try:
         audit = get_audit_by_id(session, audit_id)
@@ -312,21 +338,26 @@ def download_audit_report(audit_id: str, format: str = Query("pdf", pattern="^(p
 
         findings = get_findings_by_audit(session, audit.id)
         audit_data = audit.to_dict()
-        findings_data = [f.to_dict() for f in findings]
+        all_findings_data = [f.to_dict() for f in findings]
+        findings_data = _filter_findings_by_framework(all_findings_data, framework)
+
+        fw_suffix = f"-{framework.lower()}" if framework != "All" else ""
+        fw_label = f" ({framework} Framework)" if framework != "All" else ""
 
         if format == "pdf":
             from .report_generator import generate_pdf_report
-            pdf_bytes = generate_pdf_report(audit_data, findings_data)
+            pdf_bytes = generate_pdf_report(audit_data, findings_data, framework_label=fw_label)
             return StreamingResponse(
                 io.BytesIO(pdf_bytes),
                 media_type="application/pdf",
-                headers={"Content-Disposition": f"attachment; filename=audit-report-{audit_id}.pdf"},
+                headers={"Content-Disposition": f"attachment; filename=audit-report-{audit_id}{fw_suffix}.pdf"},
             )
 
         if format == "json":
             report = {
-                "report_title": "Cloud Compliance Guardian — Audit Report",
+                "report_title": f"Cloud Compliance Guardian — Audit Report{fw_label}",
                 "generated_at": datetime.now(timezone.utc).isoformat(),
+                "framework_filter": framework,
                 "audit": audit_data,
                 "summary": {
                     "total_checks": len(findings_data),
@@ -340,7 +371,7 @@ def download_audit_report(audit_id: str, format: str = Query("pdf", pattern="^(p
             return StreamingResponse(
                 io.BytesIO(content.encode()),
                 media_type="application/json",
-                headers={"Content-Disposition": f"attachment; filename=audit-report-{audit_id}.json"},
+                headers={"Content-Disposition": f"attachment; filename=audit-report-{audit_id}{fw_suffix}.json"},
             )
 
         # CSV format
@@ -364,7 +395,7 @@ def download_audit_report(audit_id: str, format: str = Query("pdf", pattern="^(p
         return StreamingResponse(
             io.BytesIO(content.encode()),
             media_type="text/csv",
-            headers={"Content-Disposition": f"attachment; filename=audit-report-{audit_id}.csv"},
+            headers={"Content-Disposition": f"attachment; filename=audit-report-{audit_id}{fw_suffix}.csv"},
         )
     finally:
         session.close()
@@ -1077,35 +1108,43 @@ def get_latest_aws_scan():
 
 
 @app.get("/api/aws/scan/report")
-def download_aws_report(format: str = Query("pdf", pattern="^(pdf|csv|json)$")):
-    """Download the latest AWS live scan report."""
+def download_aws_report(
+    format: str = Query("pdf", pattern="^(pdf|csv|json)$"),
+    framework: str = Query("All", pattern="^(All|CIS|NIST)$"),
+):
+    """Download the latest AWS live scan report, optionally filtered by compliance framework."""
     if not _aws_scan_cache:
         raise HTTPException(status_code=404, detail="No scan results. Run a scan first.")
 
     audit = _aws_scan_cache.get("audit", {})
     scan = _aws_scan_cache.get("scan", {})
-    findings_list = audit.get("findings", [])
+    all_findings = audit.get("findings", [])
+    findings_list = _filter_findings_by_framework(all_findings, framework)
     region = _aws_scan_cache.get("region", "unknown")
     scan_time = _aws_scan_cache.get("scan_time", "")
 
+    fw_suffix = f"-{framework.lower()}" if framework != "All" else ""
+    fw_label = f" ({framework} Framework)" if framework != "All" else ""
+
     if format == "json":
         report = {
-            "report_title": "Cloud Compliance Guardian — AWS Live Audit Report",
+            "report_title": f"Cloud Compliance Guardian — AWS Live Audit Report{fw_label}",
             "generated_at": datetime.now(timezone.utc).isoformat(),
+            "framework_filter": framework,
             "region": region,
             "scan_time": scan_time,
             "scan_summary": scan,
             "health_score": audit.get("health_score", 0),
-            "total_checks": audit.get("total_checks", 0),
-            "passed": audit.get("passed", 0),
-            "failed": audit.get("failed", 0),
+            "total_checks": len(findings_list),
+            "passed": sum(1 for f in findings_list if f.get("status") == "PASS"),
+            "failed": sum(1 for f in findings_list if f.get("status") == "FAIL"),
             "findings": findings_list,
         }
         content = json.dumps(report, indent=2, default=str)
         return StreamingResponse(
             io.BytesIO(content.encode()),
             media_type="application/json",
-            headers={"Content-Disposition": f"attachment; filename=aws-audit-report.json"},
+            headers={"Content-Disposition": f"attachment; filename=aws-audit-report{fw_suffix}.json"},
         )
 
     if format == "csv":
@@ -1113,7 +1152,7 @@ def download_aws_report(format: str = Query("pdf", pattern="^(pdf|csv|json)$")):
         writer = csv.writer(output)
         writer.writerow([
             "Status", "Severity", "Rule ID", "Title", "Resource",
-            "Resource Type", "Cloud Provider", "Description", "Reasoning",
+            "Resource Type", "Cloud Provider", "Framework", "Description", "Reasoning",
             "Expected", "Actual", "Recommendation", "Remediation"
         ])
         for f in findings_list:
@@ -1123,6 +1162,7 @@ def download_aws_report(format: str = Query("pdf", pattern="^(pdf|csv|json)$")):
                 f.get("title", f.get("rule_title", "")),
                 f.get("resource_name", f.get("resource", "")),
                 f.get("resource_type", ""), "AWS",
+                f.get("framework", "CIS"),
                 f.get("description", ""), f.get("reasoning", ""),
                 f.get("expected", ""), f.get("actual", ""),
                 f.get("recommendation", ""), f.get("remediation_step", ""),
@@ -1131,16 +1171,17 @@ def download_aws_report(format: str = Query("pdf", pattern="^(pdf|csv|json)$")):
         return StreamingResponse(
             io.BytesIO(content.encode()),
             media_type="text/csv",
-            headers={"Content-Disposition": f"attachment; filename=aws-audit-report.csv"},
+            headers={"Content-Disposition": f"attachment; filename=aws-audit-report{fw_suffix}.csv"},
         )
 
     # PDF
     from .report_generator import generate_aws_pdf_report
-    pdf_bytes = generate_aws_pdf_report(_aws_scan_cache)
+    cache_filtered = {**_aws_scan_cache, "audit": {**audit, "findings": findings_list}, "framework_label": fw_label}
+    pdf_bytes = generate_aws_pdf_report(cache_filtered)
     return StreamingResponse(
         io.BytesIO(pdf_bytes),
         media_type="application/pdf",
-        headers={"Content-Disposition": f"attachment; filename=aws-audit-report.pdf"},
+        headers={"Content-Disposition": f"attachment; filename=aws-audit-report{fw_suffix}.pdf"},
     )
 
 

@@ -24,6 +24,7 @@ export default function AuditsView() {
   const [downloading, setDownloading] = useState(false);
   const [scannedFiles, setScannedFiles] = useState([]);
   const [showFiles, setShowFiles] = useState(false);
+  const [reportFramework, setReportFramework] = useState("All"); // All | CIS | NIST
 
   useEffect(() => {
     fetch(`${API_BASE}/api/audits?limit=50`)
@@ -55,12 +56,14 @@ export default function AuditsView() {
     if (!selectedAudit) return;
     setDownloading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/audits/${selectedAudit.audit_id}/report?format=${format}`);
+      const frameworkParam = reportFramework !== "All" ? `&framework=${reportFramework}` : "";
+      const res = await fetch(`${API_BASE}/api/audits/${selectedAudit.audit_id}/report?format=${format}${frameworkParam}`);
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `audit-report-${selectedAudit.audit_id}.${format}`;
+      const fwLabel = reportFramework !== "All" ? `-${reportFramework.toLowerCase()}` : "";
+      a.download = `audit-report-${selectedAudit.audit_id}${fwLabel}.${format}`;
       a.click();
       URL.revokeObjectURL(url);
     } catch (e) {
@@ -119,7 +122,25 @@ export default function AuditsView() {
           >
             <Icon name="arrow-up" size={14} style={{ transform: "rotate(-90deg)" }} /> Back to Audits
           </button>
-          <div style={{ display: "flex", gap: 8 }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            {/* Framework filter for report download */}
+            <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 10px", background: "var(--bg-tertiary)", borderRadius: 8, border: "1px solid var(--border-color)" }}>
+              <Icon name="shield" size={13} style={{ color: "var(--text-muted)" }} />
+              <span style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 600 }}>Framework:</span>
+              {["All", "CIS", "NIST"].map(fw => (
+                <button
+                  key={fw}
+                  onClick={() => setReportFramework(fw)}
+                  style={{
+                    padding: "3px 10px", borderRadius: 6, fontSize: 12, fontWeight: 700,
+                    border: "none", cursor: "pointer",
+                    background: reportFramework === fw ? "var(--accent-primary)" : "transparent",
+                    color: reportFramework === fw ? "#fff" : "var(--text-secondary)",
+                    transition: "all 0.15s",
+                  }}
+                >{fw}</button>
+              ))}
+            </div>
             <button className="save-btn" onClick={() => downloadReport("pdf")} disabled={downloading}
               style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 16px" }}>
               <Icon name="file-text" size={14} /> {downloading ? "Generating..." : "Download Report (PDF)"}

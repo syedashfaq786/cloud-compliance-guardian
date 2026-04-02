@@ -158,7 +158,7 @@ def _score_color(score: float):
     return FAIL_RED
 
 
-def generate_pdf_report(audit_data: Dict[str, Any], findings_data: List[Dict[str, Any]]) -> bytes:
+def generate_pdf_report(audit_data: Dict[str, Any], findings_data: List[Dict[str, Any]], framework_label: str = "") -> bytes:
     """Generate a professional PDF audit report.
 
     Returns the PDF as bytes.
@@ -182,7 +182,8 @@ def generate_pdf_report(audit_data: Dict[str, Any], findings_data: List[Dict[str
 
     story.append(Spacer(1, 30))
     story.append(Paragraph("Cloud Compliance Guardian", styles["ReportTitle"]))
-    story.append(Paragraph("Infrastructure Compliance Audit Report", styles["ReportSubtitle"]))
+    subtitle = f"Infrastructure Compliance Audit Report{framework_label}"
+    story.append(Paragraph(subtitle, styles["ReportSubtitle"]))
 
     # Report metadata table
     audit_id = audit_data.get("audit_id", "N/A")
@@ -533,11 +534,12 @@ def generate_aws_pdf_report(scan_cache: Dict[str, Any]) -> bytes:
     scan = scan_cache.get("scan", {})
     region = scan_cache.get("region", "unknown")
     scan_time = scan_cache.get("scan_time", "")
+    framework_label = scan_cache.get("framework_label", "")
     findings = audit.get("findings", [])
     health = audit.get("health_score", 0)
-    total_checks = audit.get("total_checks", 0)
-    passed = audit.get("passed", 0)
-    failed_count = audit.get("failed", 0)
+    total_checks = len(findings)
+    passed = sum(1 for f in findings if f.get("status") == "PASS")
+    failed_count = sum(1 for f in findings if f.get("status") == "FAIL")
     failed = [f for f in findings if f.get("status") == "FAIL"]
     passed_findings = [f for f in findings if f.get("status") == "PASS"]
 
@@ -546,7 +548,8 @@ def generate_aws_pdf_report(scan_cache: Dict[str, Any]) -> bytes:
     # ═════════════════════════════════════════════════════════════════════
     story.append(Spacer(1, 30))
     story.append(Paragraph("Cloud Compliance Guardian", styles["ReportTitle"]))
-    story.append(Paragraph("AWS Live Infrastructure Audit Report", styles["ReportSubtitle"]))
+    subtitle = f"AWS Live Infrastructure Audit Report{framework_label}"
+    story.append(Paragraph(subtitle, styles["ReportSubtitle"]))
 
     meta = [
         ["Cloud Provider", "Amazon Web Services (AWS)"],

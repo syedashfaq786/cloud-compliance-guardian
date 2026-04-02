@@ -113,7 +113,6 @@ const COMPLIANCE_RULES = [
 ];
 
 const FRAMEWORKS = ["All", "CIS", "NIST"];
-const PROVIDERS = ["All", "AWS", "Azure", "GCP"];
 const CATEGORIES = ["All", ...Array.from(new Set(COMPLIANCE_RULES.map((r) => r.category))).sort()];
 const SEVERITIES = ["All", "CRITICAL", "HIGH", "MEDIUM", "LOW"];
 
@@ -133,7 +132,6 @@ export default function CISRulesView() {
   const [searchQuery, setSearchQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("All");
   const [severityFilter, setSeverityFilter] = useState("All");
-  const [providerFilter, setProviderFilter] = useState("All");
   const [frameworkFilter, setFrameworkFilter] = useState("All");
   const [expandedRule, setExpandedRule] = useState(null);
 
@@ -149,9 +147,8 @@ export default function CISRulesView() {
       r.recommendation.toLowerCase().includes(q);
     const matchesCategory = categoryFilter === "All" || r.category === categoryFilter;
     const matchesSeverity = severityFilter === "All" || r.severity === severityFilter;
-    const matchesProvider = providerFilter === "All" || r.provider === providerFilter;
     const matchesFramework = frameworkFilter === "All" || r.framework === frameworkFilter;
-    return matchesSearch && matchesCategory && matchesSeverity && matchesProvider && matchesFramework;
+    return matchesSearch && matchesCategory && matchesSeverity && matchesFramework;
   });
 
   const frameworkCounts = {
@@ -160,22 +157,15 @@ export default function CISRulesView() {
     NIST: COMPLIANCE_RULES.filter(r => r.framework === "NIST").length,
   };
 
-  const providerCounts = {
-    All: filtered.length,
-    AWS: filtered.filter(r => r.provider === "AWS").length,
-    Azure: filtered.filter(r => r.provider === "Azure").length,
-    GCP: filtered.filter(r => r.provider === "GCP").length,
-  };
-
   return (
     <div>
       <div className="page-header">
         <h2>Compliance Rules</h2>
-        <p>Reference catalog of CIS Benchmark and NIST 800-53 compliance rules across AWS, Azure, and GCP</p>
+        <p>Reference catalog of CIS Benchmark and NIST 800-53 compliance controls — applicable across AWS, Azure, and GCP</p>
       </div>
 
       {/* ── Framework Tabs ─────────────────────────────────────────── */}
-      <div style={{ display: "flex", gap: 10, marginBottom: 12 }}>
+      <div style={{ display: "flex", gap: 10, marginBottom: 12, alignItems: "center", flexWrap: "wrap" }}>
         {FRAMEWORKS.map((f) => (
           <button
             key={f}
@@ -188,23 +178,15 @@ export default function CISRulesView() {
             {f} <span style={{ opacity: 0.7, fontSize: 11 }}>({frameworkCounts[f]})</span>
           </button>
         ))}
-      </div>
-
-      {/* ── Provider Tabs ──────────────────────────────────────────── */}
-      <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
-        {PROVIDERS.map((p) => (
-          <button
-            key={p}
-            className={`period-btn ${providerFilter === p ? "active" : ""}`}
-            onClick={() => setProviderFilter(p)}
-            style={{ display: "flex", alignItems: "center", gap: 6 }}
-          >
-            {p !== "All" && (
-              <img src={`/logos/${p.toLowerCase()}.svg`} alt={p} style={{ width: 16, height: 16 }} />
-            )}
-            {p} <span style={{ opacity: 0.7, fontSize: 11 }}>({providerCounts[p]})</span>
-          </button>
-        ))}
+        <span style={{
+          marginLeft: "auto", fontSize: 12, color: "var(--text-muted)",
+          display: "flex", alignItems: "center", gap: 6,
+        }}>
+          <img src="/logos/aws.svg" alt="AWS" style={{ width: 16, height: 16, opacity: 0.7 }} />
+          <img src="/logos/azure.svg" alt="Azure" style={{ width: 16, height: 16, opacity: 0.7 }} />
+          <img src="/logos/gcp.svg" alt="GCP" style={{ width: 16, height: 16, opacity: 0.7 }} />
+          Controls apply to all cloud providers
+        </span>
       </div>
 
       {/* ── Search & Filters ───────────────────────────────────────── */}
@@ -259,7 +241,14 @@ export default function CISRulesView() {
               <div className="card-body">
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                    <span className="rule-id" style={{ fontSize: 13 }}>{rule.id}</span>
+                    <a
+                      href={rule.docUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                      className="rule-id"
+                      style={{ fontSize: 13, textDecoration: "none", color: "var(--accent-primary)", borderBottom: "1px dashed var(--accent-primary)" }}
+                    >{rule.id}</a>
                     <span style={{
                       fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 99,
                       background: fc.bg, color: fc.color, border: `1px solid ${fc.border}`,
@@ -268,7 +257,9 @@ export default function CISRulesView() {
                     <span style={{
                       fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 99,
                       background: pc.bg, color: pc.color, border: `1px solid ${pc.border}`
-                    }}>{rule.provider}</span>
+                    }}>
+                      {rule.provider === "All" ? "All Clouds" : rule.provider}
+                    </span>
                   </div>
                   <span className={`severity-badge ${rule.severity.toLowerCase()}`}>{rule.severity}</span>
                 </div>

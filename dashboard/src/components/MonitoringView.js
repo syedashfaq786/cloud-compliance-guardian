@@ -21,6 +21,7 @@ export default function MonitoringView({ onNavigate }) {
   const [selectedRegions, setSelectedRegions] = useState([]);
   const [showRegionFilter, setShowRegionFilter] = useState(false);
   const [downloading, setDownloading] = useState(null); // 'pdf' | 'csv' | 'json' | null
+  const [reportFramework, setReportFramework] = useState("All"); // All | CIS | NIST
 
 
   useEffect(() => {
@@ -116,13 +117,15 @@ export default function MonitoringView({ onNavigate }) {
   const handleDownloadReport = async (format) => {
     setDownloading(format);
     try {
-      const res = await fetch(`${API}/api/${selectedCloud}/scan/report?format=${format}`);
+      const frameworkParam = reportFramework !== "All" ? `&framework=${reportFramework}` : "";
+      const res = await fetch(`${API}/api/${selectedCloud}/scan/report?format=${format}${frameworkParam}`);
       if (!res.ok) { alert("Report download failed — run a scan first."); return; }
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `${selectedCloud}-compliance-report.${format}`;
+      const fwLabel = reportFramework !== "All" ? `-${reportFramework.toLowerCase()}` : "";
+      a.download = `${selectedCloud}-compliance-report${fwLabel}.${format}`;
       a.click();
       URL.revokeObjectURL(url);
     } catch (err) {
@@ -313,40 +316,63 @@ export default function MonitoringView({ onNavigate }) {
       {/* ── Download report bar (only when scan results exist) ── */}
       {scanResults && !scanResults.error && (
         <div style={{
-          display: "flex", alignItems: "center", justifyContent: "space-between",
-          padding: "12px 18px", marginBottom: 24,
+          padding: "14px 18px", marginBottom: 24,
           background: "var(--bg-card)", border: "1px solid var(--border-color)",
           borderRadius: 12, boxShadow: "var(--shadow-card)",
         }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <div style={{ width: 32, height: 32, borderRadius: 8, background: "rgba(255,122,0,0.1)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-              <Icon name="file-text" size={16} style={{ color: "var(--accent-amber)" }} />
-            </div>
-            <div>
-              <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)" }}>Compliance Report Ready</div>
-              <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
-                Last scan: {scanResults?.scan_time ? new Date(scanResults.scan_time).toLocaleString() : "Available"}
+          {/* Top row: icon + label + download buttons */}
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <div style={{ width: 32, height: 32, borderRadius: 8, background: "rgba(255,122,0,0.1)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <Icon name="file-text" size={16} style={{ color: "var(--accent-amber)" }} />
+              </div>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)" }}>Compliance Report Ready</div>
+                <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                  Last scan: {scanResults?.scan_time ? new Date(scanResults.scan_time).toLocaleString() : "Available"}
+                  {reportFramework !== "All" && (
+                    <span style={{ marginLeft: 8, fontWeight: 700, color: "var(--accent-primary)" }}>· {reportFramework} framework only</span>
+                  )}
+                </div>
               </div>
             </div>
-          </div>
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <button
-              className="save-btn"
-              onClick={() => handleDownloadReport("pdf")}
-              disabled={!!downloading}
-              style={{ display: "flex", alignItems: "center", gap: 7, padding: "9px 18px" }}
-            >
-              <Icon name="file-text" size={14} />
-              {downloading === "pdf" ? "Generating…" : "Download Report (PDF)"}
-            </button>
-            <button className="download-btn" onClick={() => handleDownloadReport("csv")} disabled={!!downloading}>
-              <Icon name="file-text" size={13} />
-              {downloading === "csv" ? "…" : "CSV"}
-            </button>
-            <button className="download-btn" onClick={() => handleDownloadReport("json")} disabled={!!downloading}>
-              <Icon name="file-text" size={13} />
-              {downloading === "json" ? "…" : "JSON"}
-            </button>
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              {/* Framework filter */}
+              <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "5px 8px", background: "var(--bg-tertiary)", borderRadius: 8, border: "1px solid var(--border-color)" }}>
+                <Icon name="shield" size={13} style={{ color: "var(--text-muted)" }} />
+                <span style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 600, marginRight: 2 }}>Framework:</span>
+                {["All", "CIS", "NIST"].map(fw => (
+                  <button
+                    key={fw}
+                    onClick={() => setReportFramework(fw)}
+                    style={{
+                      padding: "3px 9px", borderRadius: 5, fontSize: 11, fontWeight: 700,
+                      border: "none", cursor: "pointer",
+                      background: reportFramework === fw ? "var(--accent-primary)" : "transparent",
+                      color: reportFramework === fw ? "#fff" : "var(--text-secondary)",
+                      transition: "all 0.15s",
+                    }}
+                  >{fw}</button>
+                ))}
+              </div>
+              <button
+                className="save-btn"
+                onClick={() => handleDownloadReport("pdf")}
+                disabled={!!downloading}
+                style={{ display: "flex", alignItems: "center", gap: 7, padding: "9px 18px" }}
+              >
+                <Icon name="file-text" size={14} />
+                {downloading === "pdf" ? "Generating…" : "Download Report (PDF)"}
+              </button>
+              <button className="download-btn" onClick={() => handleDownloadReport("csv")} disabled={!!downloading}>
+                <Icon name="file-text" size={13} />
+                {downloading === "csv" ? "…" : "CSV"}
+              </button>
+              <button className="download-btn" onClick={() => handleDownloadReport("json")} disabled={!!downloading}>
+                <Icon name="file-text" size={13} />
+                {downloading === "json" ? "…" : "JSON"}
+              </button>
+            </div>
           </div>
         </div>
       )}
