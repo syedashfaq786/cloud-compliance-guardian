@@ -674,19 +674,21 @@ def audit_live_resources(scan_data: Dict[str, Any]) -> Dict[str, Any]:
             if sev in results["summary"]:
                 results["summary"][sev] += 1
 
-    results["total_checks"] = len(results["findings"])
+    total_checks = len(results["findings"])
+    results["total_checks"] = total_checks
     results["passed"] = results["summary"]["passing"]
     results["failed"] = results["summary"]["failing"]
 
-    # Calculate health score
-    total = results["summary"]["total_resources"]
-    if total > 0:
+    # Calculate health score — based on findings, not resource count, for consistency
+    if total_checks > 0:
         severity_weights = {"critical": 15, "high": 8, "medium": 3, "low": 1}
+        # Only FAIL findings with known severity incur penalty
         total_penalty = sum(
             results["summary"].get(sev, 0) * weight
             for sev, weight in severity_weights.items()
         )
-        max_penalty = total * 15
+        # Max possible penalty: all checks are CRITICAL
+        max_penalty = total_checks * severity_weights["critical"]
         results["health_score"] = max(0, round(100 - (total_penalty / max_penalty * 100), 1))
 
     return results

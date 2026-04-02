@@ -17,7 +17,7 @@ export default function MonitoringView({ onNavigate }) {
   const [activeTab, setActiveTab] = useState("overview");
   const [activeFilter, setActiveFilter] = useState("all");
   
-  const [availableRegions, setAvailableRegions] = useState([]); // eslint-disable-line
+  const [availableRegions, setAvailableRegions] = useState([]);
   const [selectedRegions, setSelectedRegions] = useState([]);
   const [showRegionFilter, setShowRegionFilter] = useState(false);
   const [downloading, setDownloading] = useState(null); // 'pdf' | 'csv' | 'json' | null
@@ -221,20 +221,82 @@ export default function MonitoringView({ onNavigate }) {
         </div>
 
         {/* Right action buttons — scan + region + disconnect */}
-        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+        <div style={{ display: "flex", gap: 10, alignItems: "center", position: "relative" }}>
           {selectedCloud === "aws" && (
-            <button
-              onClick={() => setShowRegionFilter(!showRegionFilter)}
-              style={{
-                display: "flex", alignItems: "center", gap: 8, padding: "9px 16px",
-                background: "var(--bg-tertiary)", border: "1px solid var(--border-color)",
-                borderRadius: 8, cursor: "pointer", fontSize: 13,
-                color: "var(--text-primary)", fontWeight: 500,
-              }}
-            >
-              <Icon name="globe" size={14} />
-              {selectedRegions.length === 1 ? selectedRegions[0] : selectedRegions.length > 1 ? `${selectedRegions.length} Regions` : "Select Region"}
-            </button>
+            <div style={{ position: "relative" }}>
+              <button
+                onClick={() => setShowRegionFilter(!showRegionFilter)}
+                style={{
+                  display: "flex", alignItems: "center", gap: 8, padding: "9px 16px",
+                  background: showRegionFilter ? "var(--accent-primary)" : "var(--bg-tertiary)",
+                  border: `1px solid ${showRegionFilter ? "var(--accent-primary)" : "var(--border-color)"}`,
+                  borderRadius: 8, cursor: "pointer", fontSize: 13,
+                  color: showRegionFilter ? "#fff" : "var(--text-primary)", fontWeight: 500,
+                }}
+              >
+                <Icon name="globe" size={14} />
+                {selectedRegions.length === 1 ? selectedRegions[0] : selectedRegions.length > 1 ? `${selectedRegions.length} Regions` : "Select Region"}
+              </button>
+              {showRegionFilter && (
+                <div style={{
+                  position: "absolute", top: "calc(100% + 8px)", right: 0, zIndex: 100,
+                  background: "var(--bg-card)", border: "1px solid var(--border-color)",
+                  borderRadius: 12, boxShadow: "0 8px 32px rgba(0,0,0,0.18)",
+                  minWidth: 220, padding: "8px 0", maxHeight: 320, overflowY: "auto"
+                }}>
+                  <div style={{ padding: "8px 16px 4px", fontSize: 11, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                    Select Regions
+                  </div>
+                  {availableRegions.length === 0 && (
+                    <div style={{ padding: "12px 16px", fontSize: 13, color: "var(--text-muted)" }}>Loading regions…</div>
+                  )}
+                  {availableRegions.map(region => {
+                    const isSelected = selectedRegions.includes(region);
+                    return (
+                      <button
+                        key={region}
+                        onClick={() => {
+                          setSelectedRegions(prev =>
+                            isSelected ? prev.filter(r => r !== region) : [...prev, region]
+                          );
+                        }}
+                        style={{
+                          display: "flex", alignItems: "center", gap: 10, width: "100%",
+                          padding: "9px 16px", background: isSelected ? "rgba(255,122,0,0.08)" : "transparent",
+                          border: "none", cursor: "pointer", fontSize: 13, textAlign: "left",
+                          color: isSelected ? "var(--accent-primary)" : "var(--text-primary)",
+                          fontWeight: isSelected ? 700 : 400,
+                        }}
+                      >
+                        <span style={{
+                          width: 16, height: 16, borderRadius: 4, flexShrink: 0,
+                          border: `2px solid ${isSelected ? "var(--accent-primary)" : "var(--border-color)"}`,
+                          background: isSelected ? "var(--accent-primary)" : "transparent",
+                          display: "flex", alignItems: "center", justifyContent: "center"
+                        }}>
+                          {isSelected && <span style={{ color: "#fff", fontSize: 10, fontWeight: 900 }}>✓</span>}
+                        </span>
+                        {region}
+                      </button>
+                    );
+                  })}
+                  <div style={{ borderTop: "1px solid var(--border-color)", padding: "8px 16px", display: "flex", gap: 8 }}>
+                    <button
+                      onClick={() => { setShowRegionFilter(false); }}
+                      style={{ flex: 1, padding: "7px 0", borderRadius: 6, background: "var(--accent-primary)", color: "#fff", border: "none", cursor: "pointer", fontSize: 13, fontWeight: 700 }}
+                    >
+                      Apply
+                    </button>
+                    <button
+                      onClick={() => { setSelectedRegions(availableRegions); }}
+                      style={{ padding: "7px 12px", borderRadius: 6, background: "var(--bg-tertiary)", color: "var(--text-secondary)", border: "1px solid var(--border-color)", cursor: "pointer", fontSize: 12 }}
+                    >
+                      All
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           )}
           <button className="save-btn" onClick={handleScan} disabled={scanning} style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 20px" }}>
             {scanning ? <><span className="spinner"></span> Scanning…</> : <><Icon name="refresh" size={16} /> Run Live Scan</>}

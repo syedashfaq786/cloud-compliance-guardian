@@ -3,22 +3,36 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Icon, Logo } from "@/components/Icons";
 
+// ── Seeded demo credentials ───────────────────────────────────────────────────
+const DEMO_USERS = [
+  { email: "admin@invecto.com",   password: "Admin@2024",  role: "Admin"    },
+  { email: "auditor@invecto.com", password: "Audit@2024",  role: "Auditor"  },
+  { email: "demo@invecto.com",    password: "Demo@1234",   role: "Viewer"   },
+];
+
 export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [error, setError] = useState("");
   const router = useRouter();
 
   const handleSubmit = (e) => {
     if (e && e.preventDefault) e.preventDefault();
+    setError("");
+    const match = DEMO_USERS.find(u => u.email === email.trim() && u.password === password);
+    if (!match) {
+      setError("Invalid email or password. Use the demo credentials below.");
+      return;
+    }
     setIsLoading(true);
-    // Simulate auth delay
     setTimeout(() => {
       setIsLoading(false);
       router.push("/dashboard");
     }, 800);
   };
+
 
   return (
     <div className="login-page">
@@ -143,6 +157,12 @@ export default function LoginPage() {
                 </label>
                 <a href="#" className="forgot-link">Forgot password?</a>
               </div>
+
+              {error && (
+                <div style={{ padding: "10px 14px", borderRadius: 8, background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.25)", color: "#ef4444", fontSize: 13, marginBottom: 4 }}>
+                  {error}
+                </div>
+              )}
 
               <button
                 type="button"
