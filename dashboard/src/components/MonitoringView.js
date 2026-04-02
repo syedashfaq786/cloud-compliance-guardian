@@ -341,7 +341,7 @@ export default function MonitoringView({ onNavigate }) {
               <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "5px 8px", background: "var(--bg-tertiary)", borderRadius: 8, border: "1px solid var(--border-color)" }}>
                 <Icon name="shield" size={13} style={{ color: "var(--text-muted)" }} />
                 <span style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 600, marginRight: 2 }}>Framework:</span>
-                {["All", "CIS", "NIST"].map(fw => (
+                {["All", "CIS", "NIST", "CCM"].map(fw => (
                   <button
                     key={fw}
                     onClick={() => setReportFramework(fw)}

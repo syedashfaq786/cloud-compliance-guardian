@@ -305,11 +305,15 @@ def _filter_findings_by_framework(findings_data: list, framework: str) -> list:
     """Filter findings to only those matching the given compliance framework.
     CIS rules have IDs like 'CIS 1.4', 'CIS-AZ 1.1.1', 'CIS-GCP 3.1'.
     NIST rules have IDs like 'NIST AC-2', 'NIST AU-3', etc.
+    CCM rules have IDs like 'A&A-01', 'IAM-07', 'TVM-09', etc. (domain-code-number format).
     If framework is 'All', return all findings unchanged.
     """
     if not framework or framework == "All":
         return findings_data
     framework_upper = framework.upper()
+    # CCM domain prefixes (17 domains from CSA CCM v4.1)
+    CCM_DOMAINS = {"A&A", "AIS", "BCR", "CCC", "CEK", "DCS", "DSP", "GRC", "HRS",
+                   "IAM", "IPY", "I&S", "LOG", "SEF", "STA", "TVM", "UEM"}
     filtered = []
     for f in findings_data:
         rule_id = (f.get("rule_id") or f.get("cis_rule_id") or "").upper()
@@ -320,6 +324,11 @@ def _filter_findings_by_framework(findings_data: list, framework: str) -> list:
             filtered.append(f)
         elif framework_upper == "NIST" and (rule_id.startswith("NIST") or framework_field == "NIST"):
             filtered.append(f)
+        elif framework_upper == "CCM":
+            # CCM IDs start with a domain prefix followed by a dash and number
+            domain_prefix = rule_id.split("-")[0] if "-" in rule_id else ""
+            if framework_field == "CCM" or domain_prefix in CCM_DOMAINS:
+                filtered.append(f)
     return filtered
 
 
@@ -327,7 +336,7 @@ def _filter_findings_by_framework(findings_data: list, framework: str) -> list:
 def download_audit_report(
     audit_id: str,
     format: str = Query("pdf", pattern="^(pdf|csv|json)$"),
-    framework: str = Query("All", pattern="^(All|CIS|NIST)$"),
+    framework: str = Query("All", pattern="^(All|CIS|NIST|CCM)$"),
 ):
     """Download an audit report as PDF, CSV, or JSON, optionally filtered by compliance framework."""
     session = get_session()
@@ -1110,7 +1119,7 @@ def get_latest_aws_scan():
 @app.get("/api/aws/scan/report")
 def download_aws_report(
     format: str = Query("pdf", pattern="^(pdf|csv|json)$"),
-    framework: str = Query("All", pattern="^(All|CIS|NIST)$"),
+    framework: str = Query("All", pattern="^(All|CIS|NIST|CCM)$"),
 ):
     """Download the latest AWS live scan report, optionally filtered by compliance framework."""
     if not _aws_scan_cache:

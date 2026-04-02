@@ -127,7 +127,7 @@ export default function AuditsView() {
             <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 10px", background: "var(--bg-tertiary)", borderRadius: 8, border: "1px solid var(--border-color)" }}>
               <Icon name="shield" size={13} style={{ color: "var(--text-muted)" }} />
               <span style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 600 }}>Framework:</span>
-              {["All", "CIS", "NIST"].map(fw => (
+              {["All", "CIS", "NIST", "CCM"].map(fw => (
                 <button
                   key={fw}
                   onClick={() => setReportFramework(fw)}
