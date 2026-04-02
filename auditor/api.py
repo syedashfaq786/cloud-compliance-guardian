@@ -355,7 +355,7 @@ def download_audit_report(
 
         if format == "pdf":
             from .report_generator import generate_pdf_report
-            pdf_bytes = generate_pdf_report(audit_data, findings_data, framework_label=fw_label)
+            pdf_bytes = generate_pdf_report(audit_data, findings_data, framework_label=fw_label, framework=framework)
             return StreamingResponse(
                 io.BytesIO(pdf_bytes),
                 media_type="application/pdf",
@@ -363,16 +363,20 @@ def download_audit_report(
             )
 
         if format == "json":
+            fw_total = len(findings_data)
+            fw_passed = sum(1 for f in findings_data if f.get("status") == "PASS")
+            fw_failed = fw_total - fw_passed
+            fw_score = round((fw_passed / fw_total) * 100, 1) if fw_total > 0 else 0.0
             report = {
                 "report_title": f"Cloud Compliance Guardian — Audit Report{fw_label}",
                 "generated_at": datetime.now(timezone.utc).isoformat(),
                 "framework_filter": framework,
                 "audit": audit_data,
                 "summary": {
-                    "total_checks": len(findings_data),
-                    "passed": sum(1 for f in findings_data if f.get("status") == "PASS"),
-                    "failed": sum(1 for f in findings_data if f.get("status") == "FAIL"),
-                    "compliance_score": audit_data["compliance_score"],
+                    "total_checks": fw_total,
+                    "passed": fw_passed,
+                    "failed": fw_failed,
+                    "compliance_score": fw_score,
                 },
                 "findings": findings_data,
             }
@@ -1185,7 +1189,7 @@ def download_aws_report(
 
     # PDF
     from .report_generator import generate_aws_pdf_report
-    cache_filtered = {**_aws_scan_cache, "audit": {**audit, "findings": findings_list}, "framework_label": fw_label}
+    cache_filtered = {**_aws_scan_cache, "audit": {**audit, "findings": findings_list}, "framework_label": fw_label, "framework": framework}
     pdf_bytes = generate_aws_pdf_report(cache_filtered)
     return StreamingResponse(
         io.BytesIO(pdf_bytes),
