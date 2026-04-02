@@ -302,33 +302,33 @@ def trigger_scan(request: ScanRequest):
 
 
 def _filter_findings_by_framework(findings_data: list, framework: str) -> list:
-    """Filter findings to only those matching the given compliance framework.
-    CIS rules have IDs like 'CIS 1.4', 'CIS-AZ 1.1.1', 'CIS-GCP 3.1'.
-    NIST rules have IDs like 'NIST AC-2', 'NIST AU-3', etc.
-    CCM rules have IDs like 'A&A-01', 'IAM-07', 'TVM-09', etc. (domain-code-number format).
-    If framework is 'All', return all findings unchanged.
     """
+    For NIST and CCM: translate ALL findings to the target framework using the
+    control mapping table — so every finding gets the correct control ID, title,
+    description and recommendation for the selected framework.
+
+    For CIS: return only findings originally tagged as CIS.
+    For All: return all findings unchanged.
+    """
+    from .framework_mapping import translate_findings_to_framework
+
     if not framework or framework == "All":
         return findings_data
+
+    if framework in ("NIST", "CCM"):
+        # Translate every finding to the selected framework
+        return translate_findings_to_framework(findings_data, framework)
+
+    # CIS: only return findings originally generated as CIS checks
     framework_upper = framework.upper()
-    # CCM domain prefixes (17 domains from CSA CCM v4.1)
-    CCM_DOMAINS = {"A&A", "AIS", "BCR", "CCC", "CEK", "DCS", "DSP", "GRC", "HRS",
-                   "IAM", "IPY", "I&S", "LOG", "SEF", "STA", "TVM", "UEM"}
     filtered = []
     for f in findings_data:
         rule_id = (f.get("rule_id") or f.get("cis_rule_id") or "").upper()
         framework_field = (f.get("framework") or "").upper()
         if framework_field == framework_upper:
             filtered.append(f)
-        elif framework_upper == "CIS" and (rule_id.startswith("CIS") or framework_field == "CIS"):
+        elif rule_id.startswith("CIS") or framework_field == "CIS":
             filtered.append(f)
-        elif framework_upper == "NIST" and (rule_id.startswith("NIST") or framework_field == "NIST"):
-            filtered.append(f)
-        elif framework_upper == "CCM":
-            # CCM IDs start with a domain prefix followed by a dash and number
-            domain_prefix = rule_id.split("-")[0] if "-" in rule_id else ""
-            if framework_field == "CCM" or domain_prefix in CCM_DOMAINS:
-                filtered.append(f)
     return filtered
 
 
