@@ -171,6 +171,7 @@ class GitHubConnectRequest(BaseModel):
 
 class AWSScanRequest(BaseModel):
     regions: Optional[List[str]] = ["all"]
+    framework: Optional[str] = "All"  # All | CIS | NIST | CCM
 
 
 class AzureCredentialsRequest(BaseModel):
@@ -703,6 +704,18 @@ def configure_aws(creds: AWSCredentialsRequest, background_tasks: BackgroundTask
     return {"status": "connected", **result}
 
 
+@app.post("/api/aws/disconnect")
+def disconnect_aws():
+    """Remove AWS credentials and clear scan cache."""
+    global _aws_scan_cache
+    _delete_aws_credentials()
+    _aws_scan_cache = {}
+    # Also clear the persisted scan cache file
+    if _AWS_SCAN_CACHE_FILE.exists():
+        _AWS_SCAN_CACHE_FILE.unlink()
+    return {"status": "disconnected"}
+
+
 async def background_resource_broadcast():
     """Notify all clients that infrastructure has changed."""
     await manager.broadcast({
@@ -710,9 +723,6 @@ async def background_resource_broadcast():
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "provider": "aws"
     })
-
-
-    return {"status": "disconnected"}
 
 
 # ── Azure Endpoints ───────────────────────────────────────────────────────
@@ -757,7 +767,11 @@ def configure_azure(creds: AzureCredentialsRequest, background_tasks: Background
 
 @app.post("/api/azure/disconnect")
 def disconnect_azure():
+    global _azure_scan_cache
     _delete_azure_credentials()
+    _azure_scan_cache = None
+    if _AZURE_SCAN_CACHE_FILE.exists():
+        _AZURE_SCAN_CACHE_FILE.unlink()
     return {"status": "disconnected"}
 
 
@@ -802,7 +816,11 @@ def configure_gcp(creds: GCPCredentialsRequest, background_tasks: BackgroundTask
 
 @app.post("/api/gcp/disconnect")
 def disconnect_gcp():
+    global _gcp_scan_cache
     _delete_gcp_credentials()
+    _gcp_scan_cache = None
+    if _GCP_SCAN_CACHE_FILE.exists():
+        _GCP_SCAN_CACHE_FILE.unlink()
     return {"status": "disconnected"}
 
 
@@ -812,14 +830,21 @@ async def run_aws_scan(request: Optional[AWSScanRequest] = None):
     global _aws_scan_cache
     scanner = AWSScanner()
 
-    # Determine regions to scan — default to primary region for speed
-    regions = (request.regions if request else None) or [scanner.region]
+    # Determine regions to scan — default to ALL opted-in regions in the account
+    regions = (request.regions if request else None) or scanner.get_available_regions() or [scanner.region]
+    framework = (request.framework if request else None) or "All"
 
     # Run the scan (synchronous blocking call, but in a thread if called via background_tasks)
     scan_data = scanner.run_full_scan(regions=regions)
 
-    # Run the audit
-    audit_results = audit_aws_resources(scan_data)
+    # Run the correct auditor based on selected framework
+    if framework == "NIST" and audit_aws_resources_nist is not None:
+        audit_results = audit_aws_resources_nist(scan_data)
+    elif framework == "CCM" and audit_aws_resources_ccm is not None:
+        audit_results = audit_aws_resources_ccm(scan_data)
+    else:
+        # CIS or All — run CIS auditor (default)
+        audit_results = audit_aws_resources(scan_data)
 
     # Merge scan summary with audit results
     result = {
@@ -829,6 +854,7 @@ async def run_aws_scan(request: Optional[AWSScanRequest] = None):
         "primary_region": scan_data["primary_region"],
         "resources": scan_data["resources"],
         "audit": audit_results,
+        "framework": framework,
     }
 
     _aws_scan_cache = result
@@ -1093,176 +1119,320 @@ async def topology_websocket(websocket: WebSocket):
 @app.get("/api/topology")
 def get_topology():
     """
-    Build a force-graph topology from scan cache.
-    Returns nodes and edges with relationship data for D3 force simulation.
+    Build an audit-grade topology:
+      Org layer → Account → Regions → VPCs → Subnets → Resources
+      Attribution layer (CloudTrail events → IAM identities)
+      Compliance layer (per-resource pass/fail + severity)
+      Evidence layer (type-grouped inventory with counts)
     """
     try:
         resources = _aws_scan_cache.get("resources", []) if _aws_scan_cache else []
         findings  = _aws_scan_cache.get("audit", {}).get("findings", []) if _aws_scan_cache else []
         scan_meta = _aws_scan_cache.get("scan", {}) if _aws_scan_cache else {}
+        events    = _aws_scan_cache.get("events", [])[:50] if _aws_scan_cache else []
 
         failed_ids = {f.get("resource_id") for f in findings if f.get("status") == "FAIL"}
 
         if not resources:
-            return {"nodes": [], "edges": [], "groups": [],
-                    "meta": {"total": 0, "compliant": 0, "violations": 0, "scan_time": None}}
+            return {
+                "org_layer": {}, "regions": [], "attribution": [], "evidence": {},
+                "type_counts": {}, "meta": {"total": 0, "compliant": 0, "violations": 0, "scan_time": None}
+            }
 
-        TYPE_META = {
-            "aws_iam_user":        {"label": "IAM Users",        "color": "#a78bfa", "group": "Identity"},
-            "aws_iam_policy":      {"label": "IAM Policies",     "color": "#7c3aed", "group": "Identity"},
-            "aws_s3_bucket":       {"label": "S3 Buckets",       "color": "#60a5fa", "group": "Storage"},
-            "aws_ec2_instance":    {"label": "EC2 Instances",    "color": "#34d399", "group": "Compute"},
-            "aws_security_group":  {"label": "Security Groups",  "color": "#f59e0b", "group": "Network"},
-            "aws_vpc":             {"label": "VPCs",             "color": "#22d3ee", "group": "Network"},
-            "aws_rds_instance":    {"label": "RDS Instances",    "color": "#fb923c", "group": "Database"},
-            "aws_lambda_function": {"label": "Lambda Functions", "color": "#e879f9", "group": "Compute"},
-            "aws_ec2_subnet":      {"label": "Subnets",          "color": "#6ee7b7", "group": "Network"},
-            "aws_ec2_internet-gateway": {"label": "IGWs",        "color": "#38bdf8", "group": "Network"},
-            "aws_secretsmanager_secret": {"label": "Secrets",    "color": "#f87171", "group": "Security"},
+        from .aws_scanner import AWSScanner
+
+        # ── Index by type and id ──────────────────────────────────────────────
+        by_type   = {}
+        res_by_id = {}
+        for r in resources:
+            rid   = r.get("resource_id")
+            rtype = r.get("resource_type", "")
+            if not rid:
+                continue
+            res_by_id[rid] = r
+            by_type.setdefault(rtype, []).append(r)
+
+        # ── Compliance index ──────────────────────────────────────────────────
+        # findings keyed by resource_id → list of findings
+        findings_by_rid = {}
+        for f in findings:
+            rid = f.get("resource_id")
+            if rid:
+                findings_by_rid.setdefault(rid, []).append(f)
+
+        failed_ids = {rid for rid, fs in findings_by_rid.items()
+                      if any(f.get("status") == "FAIL" for f in fs)}
+
+        def compliance_summary(rid):
+            fs = findings_by_rid.get(rid, [])
+            total_f  = len(fs)
+            failed_f = sum(1 for f in fs if f.get("status") == "FAIL")
+            critical = sum(1 for f in fs if f.get("status") == "FAIL" and f.get("severity") in ("CRITICAL", "HIGH"))
+            return {
+                "status":    "fail" if failed_f > 0 else ("pass" if total_f > 0 else "unknown"),
+                "total":     total_f,
+                "failed":    failed_f,
+                "critical":  critical,
+                "findings":  [{"rule_id": f.get("rule_id",""), "title": f.get("rule_title",""),
+                               "severity": f.get("severity",""), "status": f.get("status","")}
+                              for f in fs[:5]],
+            }
+
+        def make_node(r):
+            rid = r.get("resource_id", "")
+            return {
+                "id":         rid,
+                "label":      r.get("resource_name") or rid,
+                "type":       r.get("resource_type", ""),
+                "region":     r.get("region", "global"),
+                "config":     r.get("config", {}),
+                "compliance": compliance_summary(rid),
+            }
+
+        # ── Stats ────────────────────────────────────────────────────────────
+        total      = len(res_by_id)
+        violations = len(failed_ids)
+        compliant  = total - violations
+
+        type_counts = {}
+        for r in resources:
+            rt = r.get("resource_type", "")
+            if "error" not in r:
+                type_counts[rt] = type_counts.get(rt, 0) + 1
+
+        # ── 1. ORG LAYER — account + scope metadata ───────────────────────────
+        scan_time    = _aws_scan_cache.get("scan_time", "") if _aws_scan_cache else ""
+        regions_list = scan_meta.get("regions_scanned", [])
+        account_id   = scan_meta.get("account_id", "")
+        primary_reg  = scan_meta.get("primary_region") or (regions_list[0] if regions_list else "us-east-1")
+
+        # compliance posture
+        score = round((compliant / total) * 100) if total > 0 else 0
+        if score >= 80:
+            posture = "COMPLIANT"
+        elif score >= 60:
+            posture = "PARTIAL"
+        else:
+            posture = "NON-COMPLIANT"
+
+        org_layer = {
+            "account_id":    account_id,
+            "primary_region": primary_reg,
+            "regions_active": len(regions_list),
+            "regions":        regions_list,
+            "scan_time":      scan_time,
+            "posture":        posture,
+            "score":          score,
+            "total_resources": total,
+            "compliant":      compliant,
+            "violations":     violations,
+            # CloudTrail coverage
+            "cloudtrail_enabled": len(by_type.get("aws_cloudtrail", [])) > 0,
+            "cloudtrail_count":   len(by_type.get("aws_cloudtrail", [])),
+            # Config coverage (check for non-compliant resources)
+            "config_rules_checked": len(findings),
         }
 
-        # Build resource id → node index map
-        res_by_id = {r.get("resource_id"): r for r in resources if r.get("resource_id")}
-
-        nodes = []
-        edges = []
-        edge_set = set()
-        total_compliant = 0
-        total_violations = 0
-        type_counts = {}
-
-        for res in resources:
-            rid   = res.get("resource_id")
-            rtype = res.get("resource_type", "aws_unknown")
-            if not rid:
+        # ── 2. REGIONS — per-region resource breakdown ────────────────────────
+        region_map = {}
+        for r in resources:
+            if "error" in r:
                 continue
+            reg   = r.get("region", "global")
+            rtype = r.get("resource_type", "")
+            rid   = r.get("resource_id", "")
+            if reg not in region_map:
+                region_map[reg] = {
+                    "name": reg,
+                    "resources": [],
+                    "vpcs": [],
+                    "total": 0, "violations": 0,
+                    "cloudtrail": False,
+                }
+            region_map[reg]["total"] += 1
+            if rid in failed_ids:
+                region_map[reg]["violations"] += 1
+            if rtype == "aws_cloudtrail":
+                region_map[reg]["cloudtrail"] = True
 
-            is_fail = rid in failed_ids
-            if is_fail:
-                total_violations += 1
-            else:
-                total_compliant += 1
+        # Build VPC zones inside each region
+        vpcs    = by_type.get("aws_vpc", [])
+        subnets = by_type.get("aws_subnet", [])
+        igws    = by_type.get("aws_internet_gateway", [])
 
-            type_counts[rtype] = type_counts.get(rtype, 0) + 1
-            meta = TYPE_META.get(rtype, {"label": rtype.replace("aws_","").replace("_"," ").title(), "color": "#94a3b8", "group": "Other"})
+        subnets_by_vpc = {}
+        for sub in subnets:
+            hv = sub.get("config", {}).get("vpc_id", "")
+            if hv:
+                subnets_by_vpc.setdefault(hv, []).append(sub)
 
-            nodes.append({
-                "id":      rid,
-                "label":   res.get("resource_name") or rid,
-                "type":    rtype,
-                "group":   meta["group"],
-                "color":   meta["color"],
-                "status":  "fail" if is_fail else "pass",
-                "region":  res.get("region", "global"),
-                "config":  res.get("config", {}),
+        igws_by_vpc = {}
+        for igw in igws:
+            for hv in igw.get("config", {}).get("attached_vpc_ids", []):
+                if hv:
+                    igws_by_vpc.setdefault(hv, []).append(igw)
+
+        compute_types = ("aws_ec2_instance", "aws_lambda_function", "aws_ecs_cluster",
+                         "aws_lb", "aws_elb", "aws_eks_cluster", "aws_elasticache_cluster")
+        compute_by_subnet = {}
+        compute_by_vpc    = {}
+        for rtype in compute_types:
+            for r in by_type.get(rtype, []):
+                cfg = r.get("config", {})
+                hs  = cfg.get("subnet_id", "")
+                hv  = cfg.get("vpc_id", "")
+                if hs:
+                    compute_by_subnet.setdefault(hs, []).append(r)
+                elif hv:
+                    compute_by_vpc.setdefault(hv, []).append(r)
+
+        sgs_by_vpc = {}
+        for sg in by_type.get("aws_security_group", []):
+            hv = sg.get("config", {}).get("vpc_id", "")
+            if hv:
+                sgs_by_vpc.setdefault(hv, []).append(sg)
+
+        for vpc in vpcs:
+            vid     = vpc["resource_id"]
+            cfg     = vpc.get("config", {})
+            reg     = vpc.get("region", "global")
+
+            vpc_subnets = subnets_by_vpc.get(vid, [])
+            subnet_nodes = []
+            for sub in vpc_subnets:
+                sid     = sub["resource_id"]
+                sub_cfg = sub.get("config", {})
+                is_pub  = sub_cfg.get("public_subnet", False)
+                sub_resources = [make_node(r) for r in compute_by_subnet.get(sid, [])]
+                subnet_nodes.append({
+                    **make_node(sub),
+                    "is_public": is_pub,
+                    "resources": sub_resources,
+                    "az": sub_cfg.get("availability_zone", ""),
+                })
+
+            igw_list = list({n["id"]: n for n in [make_node(ig) for ig in igws_by_vpc.get(vid, [])]}.values())
+
+            vpc_node = {
+                **make_node(vpc),
+                "cidr":       cfg.get("cidr_block", ""),
+                "is_default": cfg.get("is_default", False),
+                "subnets":    subnet_nodes,
+                "unplaced":   [make_node(r) for r in compute_by_vpc.get(vid, [])],
+                "sgs":        [make_node(sg) for sg in sgs_by_vpc.get(vid, [])],
+                "igws":       igw_list,
+                "internet_exposed": len(igw_list) > 0,
+            }
+
+            if reg not in region_map:
+                region_map[reg] = {"name": reg, "resources": [], "vpcs": [],
+                                   "total": 0, "violations": 0, "cloudtrail": False}
+            region_map[reg]["vpcs"].append(vpc_node)
+
+        # Attach non-VPC regional resources to each region
+        non_vpc_types = (
+            "aws_rds_instance", "aws_rds_cluster", "aws_dynamodb_table",
+            "aws_elasticache_cluster", "aws_sqs_queue", "aws_sns_topic",
+            "aws_lambda_function", "aws_acm_certificate", "aws_ecr_repository",
+            "aws_eks_cluster", "aws_cloudtrail", "aws_cloudwatch_alarm",
+            "aws_kms_key", "aws_secretsmanager_secret", "aws_ebs_volume",
+            "aws_api_gateway_rest_api", "aws_apigatewayv2_api",
+            "aws_sfn_state_machine", "aws_elastic_beanstalk_environment",
+            "aws_wafv2_web_acl", "aws_opensearch_domain", "aws_msk_cluster",
+            "aws_lb", "aws_elb", "aws_eip",
+        )
+        for rtype in non_vpc_types:
+            for r in by_type.get(rtype, []):
+                reg = r.get("region", "global")
+                if reg not in region_map:
+                    region_map[reg] = {"name": reg, "resources": [], "vpcs": [],
+                                       "total": 0, "violations": 0, "cloudtrail": False}
+                region_map[reg]["resources"].append(make_node(r))
+
+        regions_out = sorted(region_map.values(), key=lambda x: x["name"])
+
+        # ── 3. ATTRIBUTION LAYER — CloudTrail events ──────────────────────────
+        attribution = []
+        for ev in events[:30]:
+            if "error" in ev:
+                continue
+            attribution.append({
+                "event_name":  ev.get("event_name", ""),
+                "event_source": ev.get("event_source", ""),
+                "username":    ev.get("username", "unknown"),
+                "event_time":  ev.get("event_time", ""),
+                "region":      ev.get("region", ""),
+                "source_ip":   ev.get("source_ip", ""),
+                "is_suspicious": ev.get("is_suspicious", False),
+                "error_code":  ev.get("error_code", ""),
             })
 
-        # ── Build edges from config relationships ─────────────────────────────
-        vpc_id_to_rid   = {}
-        sg_id_to_rid    = {}
-        subnet_id_to_rid = {}
+        # ── 4. EVIDENCE LAYER — grouped inventory for auditors ────────────────
+        SERVICE_GROUPS = {
+            "Identity & Access": ["aws_iam_user", "aws_iam_role", "aws_iam_policy"],
+            "Compute":           ["aws_ec2_instance", "aws_lambda_function", "aws_ecs_cluster",
+                                  "aws_eks_cluster", "aws_elastic_beanstalk_environment"],
+            "Network":           ["aws_vpc", "aws_subnet", "aws_security_group",
+                                  "aws_internet_gateway", "aws_nat_gateway", "aws_route_table",
+                                  "aws_eip", "aws_lb", "aws_elb", "aws_wafv2_web_acl"],
+            "Storage & Data":    ["aws_s3_bucket", "aws_ebs_volume", "aws_dynamodb_table",
+                                  "aws_rds_instance", "aws_rds_cluster", "aws_elasticache_cluster",
+                                  "aws_opensearch_domain", "aws_msk_cluster"],
+            "Security":          ["aws_kms_key", "aws_secretsmanager_secret", "aws_acm_certificate",
+                                  "aws_cloudtrail", "aws_cloudwatch_alarm"],
+            "Delivery & Integration": ["aws_sns_topic", "aws_sqs_queue", "aws_api_gateway_rest_api",
+                                       "aws_apigatewayv2_api", "aws_sfn_state_machine",
+                                       "aws_cloudfront_distribution", "aws_ecr_repository"],
+        }
 
-        for res in resources:
-            rid   = res.get("resource_id")
-            rtype = res.get("resource_type", "")
-            cfg   = res.get("config", {})
-            if not rid:
-                continue
-            if rtype == "aws_vpc":
-                # store original vpc_id from config
-                pass
-            if rtype == "aws_security_group":
-                pass
-            if rtype == "aws_ec2_subnet":
-                pass
+        evidence = {}
+        for group, rtypes in SERVICE_GROUPS.items():
+            group_nodes = []
+            group_violations = 0
+            for rtype in rtypes:
+                for r in by_type.get(rtype, []):
+                    if "error" in r:
+                        continue
+                    node = make_node(r)
+                    group_nodes.append(node)
+                    if node["compliance"]["status"] == "fail":
+                        group_violations += 1
+            if group_nodes:
+                evidence[group] = {
+                    "resources":  group_nodes,
+                    "count":      len(group_nodes),
+                    "violations": group_violations,
+                }
 
-        # EC2 → Security Group edges
-        for res in resources:
-            rid   = res.get("resource_id")
-            rtype = res.get("resource_type", "")
-            cfg   = res.get("config", {})
-            if not rid:
-                continue
-
-            # EC2 instances linked to security groups by resource_id hash matching
-            if rtype == "aws_ec2_instance":
-                for sg in cfg.get("security_groups", []):
-                    # find sg node by matching hashed id
-                    from .aws_scanner import AWSScanner
-                    hashed = AWSScanner._hash_id(sg)
-                    if hashed in res_by_id:
-                        ek = f"{rid}:{hashed}"
-                        if ek not in edge_set:
-                            edge_set.add(ek)
-                            edges.append({"source": rid, "target": hashed, "type": "uses_sg"})
-
-        # IAM Policy → IAM User edges (policies attached to users)
-        # Link by attachment_count heuristic — connect policies to first N users
-        iam_users   = [r for r in resources if r.get("resource_type") == "aws_iam_user"]
-        iam_policies = [r for r in resources if r.get("resource_type") == "aws_iam_policy"]
-        for pol in iam_policies:
-            pid = pol.get("resource_id")
-            cnt = pol.get("config", {}).get("attachment_count", 0)
-            if cnt and pid:
-                for user in iam_users[:min(cnt, 3)]:
-                    uid = user.get("resource_id")
-                    ek  = f"{pid}:{uid}"
-                    if uid and ek not in edge_set:
-                        edge_set.add(ek)
-                        edges.append({"source": pid, "target": uid, "type": "attached_to"})
-
-        # VPC → Subnet edges (same region cluster)
-        vpcs    = [r for r in resources if r.get("resource_type") == "aws_vpc"]
-        subnets = [r for r in resources if r.get("resource_type") == "aws_ec2_subnet"]
-        for vpc in vpcs:
-            vid = vpc.get("resource_id")
-            vregion = vpc.get("region")
-            if not vid:
-                continue
-            for sub in subnets:
-                sid = sub.get("resource_id")
-                if sid and sub.get("region") == vregion:
-                    ek = f"{vid}:{sid}"
-                    if ek not in edge_set:
-                        edge_set.add(ek)
-                        edges.append({"source": vid, "target": sid, "type": "contains"})
-
-        # Build groups summary
-        groups = []
-        group_map = {}
-        for rtype, meta in TYPE_META.items():
-            g = meta["group"]
-            if g not in group_map:
-                group_map[g] = {"name": g, "types": [], "count": 0, "violations": 0}
-            group_map[g]["types"].append(rtype)
-        for res in resources:
-            rtype = res.get("resource_type", "")
-            rid   = res.get("resource_id")
-            meta  = TYPE_META.get(rtype, {"group": "Other"})
-            g     = meta["group"]
-            if g not in group_map:
-                group_map[g] = {"name": g, "types": [], "count": 0, "violations": 0}
-            group_map[g]["count"] += 1
-            if rid in failed_ids:
-                group_map[g]["violations"] += 1
-        groups = list(group_map.values())
+        # Global resources (IAM, CloudFront) not tied to a region
+        global_resources = []
+        for rtype in ("aws_iam_user", "aws_iam_role", "aws_iam_policy",
+                       "aws_s3_bucket", "aws_cloudfront_distribution"):
+            for r in by_type.get(rtype, []):
+                if "error" not in r:
+                    global_resources.append(make_node(r))
 
         return {
-            "nodes": nodes,
-            "edges": edges,
-            "groups": groups,
-            "type_counts": type_counts,
+            "org_layer":        org_layer,
+            "regions":          regions_out,
+            "global_resources": global_resources,
+            "attribution":      attribution,
+            "evidence":         evidence,
+            "type_counts":      type_counts,
             "meta": {
-                "total":      len(nodes),
-                "compliant":  total_compliant,
-                "violations": total_violations,
-                "regions":    scan_meta.get("regions_scanned", []),
-                "scan_time":  _aws_scan_cache.get("scan_time") if _aws_scan_cache else None,
+                "total":      total,
+                "compliant":  compliant,
+                "violations": violations,
+                "score":      score,
+                "posture":    posture,
+                "regions":    regions_list,
+                "scan_time":  scan_time,
             }
         }
     except Exception as e:
         logger.error(f"Failed to generate topology: {e}", exc_info=True)
-        return {"nodes": [], "edges": [], "groups": [], "error": str(e), "meta": {}}
+        return {"org_layer": {}, "regions": [], "global_resources": [], "attribution": [],
+                "evidence": {}, "type_counts": {}, "error": str(e), "meta": {}}
 
 
 @app.get("/api/aws/scan/latest")
@@ -1288,8 +1458,13 @@ def download_aws_report(
     region = _aws_scan_cache.get("region", "unknown")
     scan_time = _aws_scan_cache.get("scan_time", "")
 
-    # For NIST and CCM, run the dedicated auditors against the raw resources
-    if framework == "NIST" and audit_aws_resources_nist is not None:
+    # Use scan framework from cache if no override is requested
+    cached_framework = _aws_scan_cache.get("framework", "All")
+    # If the requested framework matches what was scanned (or All), use cached findings directly
+    if framework == "All" or framework == cached_framework:
+        findings_list = all_findings
+        framework = cached_framework  # use actual scan framework for labels
+    elif framework == "NIST" and audit_aws_resources_nist is not None:
         nist_result = audit_aws_resources_nist({"resources": _aws_scan_cache.get("resources", [])})
         findings_list = nist_result["findings"]
     elif framework == "CCM" and audit_aws_resources_ccm is not None:

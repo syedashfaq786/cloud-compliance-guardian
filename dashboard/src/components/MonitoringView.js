@@ -2,10 +2,10 @@
 import { useState, useEffect } from "react";
 import { Icon } from "./Icons";
 
-const API = "http://localhost:8000";
+const API = "http://localhost:8001";
 
 
-export default function MonitoringView({ onNavigate: _onNavigate }) {
+export default function MonitoringView({ onNavigate }) {
   const [awsStatus, setAwsStatus] = useState(null);
   const [azureStatus, setAzureStatus] = useState(null);
   const [gcpStatus, setGcpStatus] = useState(null);
@@ -16,12 +16,12 @@ export default function MonitoringView({ onNavigate: _onNavigate }) {
   const [events, setEvents] = useState([]);
   const [activeTab, setActiveTab] = useState("overview");
   const [activeFilter, setActiveFilter] = useState("all");
-  
+
   const [availableRegions, setAvailableRegions] = useState([]);
   const [selectedRegions, setSelectedRegions] = useState([]);
   const [showRegionFilter, setShowRegionFilter] = useState(false);
   const [downloading, setDownloading] = useState(null); // 'pdf' | 'csv' | 'json' | null
-  const [reportFramework, setReportFramework] = useState("All"); // All | CIS | NIST
+  const [scanFramework, setScanFramework] = useState("All"); // selected BEFORE scan runs
 
 
   useEffect(() => {
@@ -86,9 +86,10 @@ export default function MonitoringView({ onNavigate: _onNavigate }) {
   const handleScan = async () => {
     setScanning(true);
     try {
-      let url, body;
-      url = `${API}/api/${selectedCloud}/scan`;
-      body = selectedCloud === "aws" ? { regions: selectedRegions.length ? selectedRegions : null } : {};
+      const url = `${API}/api/${selectedCloud}/scan`;
+      const body = selectedCloud === "aws"
+        ? { regions: selectedRegions.length ? selectedRegions : null, framework: scanFramework }
+        : {};
       const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -119,7 +120,9 @@ export default function MonitoringView({ onNavigate: _onNavigate }) {
   const handleDownloadReport = async (format) => {
     setDownloading(format);
     try {
-      const frameworkParam = reportFramework !== "All" ? `&framework=${reportFramework}` : "";
+      // Use the framework that was selected at scan time (stored in results or state)
+      const fw = scanResults?.framework || scanFramework;
+      const frameworkParam = fw && fw !== "All" ? `&framework=${fw}` : "";
       const reportEndpoint = `${API}/api/${selectedCloud}/scan/report?format=${format}${frameworkParam}`;
       const res = await fetch(reportEndpoint);
       if (!res.ok) { alert("Report download failed — run a scan first."); return; }
@@ -127,7 +130,7 @@ export default function MonitoringView({ onNavigate: _onNavigate }) {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      const fwLabel = reportFramework !== "All" ? `-${reportFramework.toLowerCase()}` : "";
+      const fwLabel = fw && fw !== "All" ? `-${fw.toLowerCase()}` : "";
       a.download = `${selectedCloud}-compliance-report${fwLabel}.${format}`;
       a.click();
       URL.revokeObjectURL(url);
@@ -140,11 +143,14 @@ export default function MonitoringView({ onNavigate: _onNavigate }) {
 
 
   const handleDisconnect = async () => {
+    if (!window.confirm(`Disconnect ${selectedCloud.toUpperCase()}? This will remove your credentials and clear scan results.`)) return;
     try {
       await fetch(`${API}/api/${selectedCloud}/disconnect`, { method: "POST" });
-      checkCloudStatuses();
       setScanResults(null);
       setEvents([]);
+      // Re-check statuses and navigate to Connect tab
+      await checkCloudStatuses();
+      if (onNavigate) onNavigate("connect");
     } catch {}
   };
 
@@ -161,6 +167,10 @@ export default function MonitoringView({ onNavigate: _onNavigate }) {
   const metrics = scanResults?.scan || {};
   const findings = audit?.findings || [];
   const healthScore = audit?.health_score ?? audit?.summary?.health_score ?? 0;
+  const activeFramework = scanResults?.framework || scanFramework;
+  const FRAMEWORK_COLORS = { CIS: "#f97316", NIST: "#3b82f6", CCM: "#8b5cf6", All: "var(--accent-primary)" };
+  const fwColor = FRAMEWORK_COLORS[activeFramework] || "var(--accent-primary)";
+  const fwFullName = { CIS: "CIS Benchmarks", NIST: "NIST 800-53 Rev 5", CCM: "CSA CCM v4.1", All: "All Frameworks" }[activeFramework] || activeFramework;
 
   const getSeverityColor = (severity) => ({ CRITICAL: "#ef4444", HIGH: "#f97316", MEDIUM: "#eab308", LOW: "#3b82f6" }[severity] || "#6b7280");
 
@@ -197,12 +207,39 @@ export default function MonitoringView({ onNavigate: _onNavigate }) {
           </div>
           <p style={{ margin: 0, fontSize: 13, color: "var(--text-secondary)" }}>
             Managing compliance for <strong>{selectedCloud === "aws" ? currentStatus?.user : currentStatus?.project_id || currentStatus?.tenant_id}</strong>
-            <span style={{ color: "#22c55e", marginLeft: 10, fontWeight: 600 }}>● Connected</span>
+            <span style={{ color: currentStatus?.connected ? "#22c55e" : "#ef4444", marginLeft: 10, fontWeight: 600 }}>● {currentStatus?.connected ? "Connected" : "Disconnected"}</span>
+            {scanResults && (
+              <span style={{ marginLeft: 10, fontWeight: 700, fontSize: 11, color: fwColor, background: `${fwColor}18`, padding: "2px 8px", borderRadius: 10 }}>
+                {fwFullName}
+              </span>
+            )}
           </p>
         </div>
 
-        {/* Right action buttons — scan + region + disconnect */}
-        <div style={{ display: "flex", gap: 10, alignItems: "center", position: "relative" }}>
+        {/* Right action buttons — framework + region + scan + disconnect */}
+        <div style={{ display: "flex", gap: 10, alignItems: "center", position: "relative", flexWrap: "wrap" }}>
+
+          {/* Framework selector — choose BEFORE running scan */}
+          {!scanning && (
+            <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "6px 10px", background: "var(--bg-tertiary)", borderRadius: 8, border: "1px solid var(--border-color)" }}>
+              <Icon name="shield" size={13} style={{ color: "var(--text-muted)" }} />
+              <span style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 600, marginRight: 2 }}>Framework:</span>
+              {["All", "CIS", "NIST", "CCM"].map(fw => (
+                <button
+                  key={fw}
+                  onClick={() => setScanFramework(fw)}
+                  style={{
+                    padding: "4px 10px", borderRadius: 5, fontSize: 11, fontWeight: 700,
+                    border: "none", cursor: "pointer", transition: "all 0.15s",
+                    background: scanFramework === fw ? FRAMEWORK_COLORS[fw] : "transparent",
+                    color: scanFramework === fw ? "#fff" : "var(--text-secondary)",
+                  }}
+                >{fw}</button>
+              ))}
+            </div>
+          )}
+
+          {/* Region selector (AWS only) */}
           {selectedCloud === "aws" && !scanning && (
             <div style={{ position: "relative" }}>
               <button
@@ -236,11 +273,7 @@ export default function MonitoringView({ onNavigate: _onNavigate }) {
                     return (
                       <button
                         key={region}
-                        onClick={() => {
-                          setSelectedRegions(prev =>
-                            isSelected ? prev.filter(r => r !== region) : [...prev, region]
-                          );
-                        }}
+                        onClick={() => setSelectedRegions(prev => isSelected ? prev.filter(r => r !== region) : [...prev, region])}
                         style={{
                           display: "flex", alignItems: "center", gap: 10, width: "100%",
                           padding: "9px 16px", background: isSelected ? "rgba(255,122,0,0.08)" : "transparent",
@@ -263,24 +296,23 @@ export default function MonitoringView({ onNavigate: _onNavigate }) {
                   })}
                   <div style={{ borderTop: "1px solid var(--border-color)", padding: "8px 16px", display: "flex", gap: 8 }}>
                     <button
-                      onClick={() => { setShowRegionFilter(false); }}
+                      onClick={() => setShowRegionFilter(false)}
                       style={{ flex: 1, padding: "7px 0", borderRadius: 6, background: "var(--accent-primary)", color: "#fff", border: "none", cursor: "pointer", fontSize: 13, fontWeight: 700 }}
-                    >
-                      Apply
-                    </button>
+                    >Apply</button>
                     <button
-                      onClick={() => { setSelectedRegions(availableRegions); }}
+                      onClick={() => setSelectedRegions(availableRegions)}
                       style={{ padding: "7px 12px", borderRadius: 6, background: "var(--bg-tertiary)", color: "var(--text-secondary)", border: "1px solid var(--border-color)", cursor: "pointer", fontSize: 12 }}
-                    >
-                      All
-                    </button>
+                    >All</button>
                   </div>
                 </div>
               )}
             </div>
           )}
+
           <button className="save-btn" onClick={handleScan} disabled={scanning} style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 20px" }}>
-            {scanning ? <><span className="spinner"></span> Scanning…</> : <><Icon name="refresh" size={16} /> Run Live Scan</>}
+            {scanning
+              ? <><span className="spinner"></span> Scanning {scanFramework !== "All" ? `(${scanFramework})` : ""}…</>
+              : <><Icon name="refresh" size={16} /> Run {scanFramework !== "All" ? scanFramework : "Live"} Scan</>}
           </button>
           <button
             onClick={handleDisconnect}
@@ -295,44 +327,27 @@ export default function MonitoringView({ onNavigate: _onNavigate }) {
       {scanResults && !scanResults.error && (
         <div style={{
           padding: "14px 18px", marginBottom: 24,
-          background: "var(--bg-card)", border: "1px solid var(--border-color)",
+          background: "var(--bg-card)", border: `1px solid ${fwColor}33`,
           borderRadius: 12, boxShadow: "var(--shadow-card)",
         }}>
-          {/* Top row: icon + label + download buttons */}
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <div style={{ width: 32, height: 32, borderRadius: 8, background: "rgba(255,122,0,0.1)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                <Icon name="file-text" size={16} style={{ color: "var(--accent-amber)" }} />
+              <div style={{ width: 32, height: 32, borderRadius: 8, background: `${fwColor}18`, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <Icon name="file-text" size={16} style={{ color: fwColor }} />
               </div>
               <div>
-                <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)" }}>Compliance Report Ready</div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)" }}>
+                  {fwFullName} Scan Complete
+                </div>
                 <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
                   Last scan: {scanResults?.scan_time ? new Date(scanResults.scan_time).toLocaleString() : "Available"}
-                  {reportFramework !== "All" && (
-                    <span style={{ marginLeft: 8, fontWeight: 700, color: "var(--accent-primary)" }}>· {reportFramework} framework only</span>
-                  )}
+                  <span style={{ marginLeft: 8, fontWeight: 700, color: fwColor }}>
+                    · {findings.length} controls · {findings.filter(f => f.status === "FAIL").length} findings
+                  </span>
                 </div>
               </div>
             </div>
             <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-              {/* Framework filter */}
-              <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "5px 8px", background: "var(--bg-tertiary)", borderRadius: 8, border: "1px solid var(--border-color)" }}>
-                <Icon name="shield" size={13} style={{ color: "var(--text-muted)" }} />
-                <span style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 600, marginRight: 2 }}>Framework:</span>
-                {["All", "CIS", "NIST", "CCM"].map(fw => (
-                  <button
-                    key={fw}
-                    onClick={() => setReportFramework(fw)}
-                    style={{
-                      padding: "3px 9px", borderRadius: 5, fontSize: 11, fontWeight: 700,
-                      border: "none", cursor: "pointer",
-                      background: reportFramework === fw ? "var(--accent-primary)" : "transparent",
-                      color: reportFramework === fw ? "#fff" : "var(--text-secondary)",
-                      transition: "all 0.15s",
-                    }}
-                  >{fw}</button>
-                ))}
-              </div>
               <button
                 className="save-btn"
                 onClick={() => handleDownloadReport("pdf")}
@@ -380,14 +395,19 @@ export default function MonitoringView({ onNavigate: _onNavigate }) {
 
       {!scanResults && !scanning && activeTab !== "activity" && (
         <div className="glass-card" style={{ padding: 64, textAlign: "center" }}>
-          <div style={{ width: 80, height: 80, borderRadius: 20, background: "rgba(var(--accent-primary-rgb), 0.1)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 24px" }}>
-            <Icon name="search" size={40} style={{ color: "var(--accent-primary)" }} />
+          <div style={{ width: 80, height: 80, borderRadius: 20, background: `${fwColor}18`, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 24px" }}>
+            <Icon name="shield" size={40} style={{ color: fwColor }} />
           </div>
-          <h3 style={{ fontSize: 24, marginBottom: 12 }}>Ready to Scan</h3>
-          <p style={{ color: "var(--text-secondary)", maxWidth: 450, margin: "0 auto 32px", fontSize: 15, lineHeight: 1.6 }}>
-            Run a live scan to analyze your {selectedCloud.toUpperCase()} resources against CIS Level 1 benchmarks.
+          <h3 style={{ fontSize: 24, marginBottom: 12 }}>Ready to Run {fwFullName} Scan</h3>
+          <p style={{ color: "var(--text-secondary)", maxWidth: 480, margin: "0 auto 12px", fontSize: 15, lineHeight: 1.6 }}>
+            Select a compliance framework above, then run the scan to audit your {selectedCloud.toUpperCase()} resources.
           </p>
-          <button className="save-btn" onClick={handleScan} style={{ padding: "14px 40px", fontSize: 16 }}>Start Initial Scan</button>
+          <p style={{ color: "var(--text-muted)", maxWidth: 480, margin: "0 auto 32px", fontSize: 13 }}>
+            <strong style={{ color: fwColor }}>{fwFullName}</strong> selected — the report will use {fwFullName} control IDs and titles.
+          </p>
+          <button className="save-btn" onClick={handleScan} style={{ padding: "14px 40px", fontSize: 16 }}>
+            Run {scanFramework !== "All" ? scanFramework : "Live"} Scan
+          </button>
         </div>
       )}
 
@@ -484,7 +504,7 @@ export default function MonitoringView({ onNavigate: _onNavigate }) {
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
                 <div>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-                    <span style={{ fontSize: 12, fontWeight: 800, color: "var(--text-muted)" }}>{f.cis_rule_id || f.rule_id}</span>
+                    <span style={{ fontSize: 12, fontWeight: 800, color: fwColor, background: `${fwColor}15`, padding: "2px 7px", borderRadius: 4 }}>{f.rule_id || f.cis_rule_id}</span>
                     <span style={{ fontSize: 11, fontWeight: 800, padding: "2px 8px", borderRadius: 4, background: f.status === "FAIL" ? "rgba(239,68,68,0.1)" : "rgba(34,197,94,0.1)", color: f.status === "FAIL" ? "#ef4444" : "#22c55e" }}>{f.status}</span>
                     <span style={{ fontSize: 11, fontWeight: 800, color: getSeverityColor(f.severity) }}>{f.severity}</span>
                   </div>

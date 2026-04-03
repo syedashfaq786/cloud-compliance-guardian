@@ -2,7 +2,7 @@
 import { useState, useRef, useEffect } from "react";
 import { Icon } from "./Icons";
 
-const API = "http://localhost:8000";
+const API = "http://localhost:8001";
 
 export default function ConnectView() {
   const [selectedProvider, setSelectedProvider] = useState(null);

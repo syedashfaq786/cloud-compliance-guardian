@@ -5,7 +5,7 @@ import { Icon } from "./Icons";
 
 ChartJS.register(...registerables);
 
-const API_BASE = "http://localhost:8000";
+const API_BASE = "http://localhost:8001";
 
 export default function TrendsView() {
   const [trends, setTrends] = useState([]);

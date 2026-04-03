@@ -2,7 +2,7 @@
 import { useState, useEffect } from "react";
 import { Icon } from "./Icons";
 
-const API_BASE = "http://localhost:8000";
+const API_BASE = "http://localhost:8001";
 
 const SEVERITY_META = {
   "CRITICAL": { action: "Immediate remediation required", timeline: "Fix within 24 hours", color: "var(--accent-red)" },
