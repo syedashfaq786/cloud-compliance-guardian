@@ -1,788 +1,978 @@
-'use client';
-import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+"use client";
+import { useState, useEffect, useCallback, useMemo } from "react";
+import ReactFlow, {
+  Controls, Background, MiniMap, useNodesState, useEdgesState,
+  MarkerType, Handle, Position,
+} from "reactflow";
+import "reactflow/dist/style.css";
+import dagre from "dagre";
+import { AnimatePresence, motion } from "framer-motion";
 
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001';
+const API = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
-// ── Type metadata ─────────────────────────────────────────────────────────────
-const TYPE_META = {
-  aws_iam_user:                       { label: 'IAM User',          color: '#a78bfa', icon: '👤', group: 'Identity & Access' },
-  aws_iam_role:                       { label: 'IAM Role',          color: '#c084fc', icon: '🎭', group: 'Identity & Access' },
-  aws_iam_policy:                     { label: 'IAM Policy',        color: '#7c3aed', icon: '📋', group: 'Identity & Access' },
-  aws_ec2_instance:                   { label: 'EC2',               color: '#34d399', icon: '🖥️', group: 'Compute' },
-  aws_lambda_function:                { label: 'Lambda',            color: '#e879f9', icon: '⚡', group: 'Compute' },
-  aws_ecs_cluster:                    { label: 'ECS',               color: '#4ade80', icon: '🐳', group: 'Compute' },
-  aws_eks_cluster:                    { label: 'EKS',               color: '#22c55e', icon: '☸️', group: 'Compute' },
-  aws_elastic_beanstalk_environment:  { label: 'Beanstalk',         color: '#86efac', icon: '🌿', group: 'Compute' },
-  aws_vpc:                            { label: 'VPC',               color: '#22d3ee', icon: '🌐', group: 'Network' },
-  aws_subnet:                         { label: 'Subnet',            color: '#67e8f9', icon: '🔗', group: 'Network' },
-  aws_security_group:                 { label: 'Security Group',    color: '#f59e0b', icon: '🛡️', group: 'Network' },
-  aws_internet_gateway:               { label: 'IGW',               color: '#38bdf8', icon: '🔌', group: 'Network' },
-  aws_nat_gateway:                    { label: 'NAT GW',            color: '#0ea5e9', icon: '🔀', group: 'Network' },
-  aws_route_table:                    { label: 'Route Table',       color: '#4ade80', icon: '🗺️', group: 'Network' },
-  aws_eip:                            { label: 'Elastic IP',        color: '#93c5fd', icon: '📍', group: 'Network' },
-  aws_lb:                             { label: 'Load Balancer',     color: '#fbbf24', icon: '⚖️', group: 'Network' },
-  aws_elb:                            { label: 'Classic LB',        color: '#f59e0b', icon: '⚖️', group: 'Network' },
-  aws_wafv2_web_acl:                  { label: 'WAF',               color: '#fb923c', icon: '🔰', group: 'Network' },
-  aws_s3_bucket:                      { label: 'S3 Bucket',         color: '#60a5fa', icon: '🪣', group: 'Storage & Data' },
-  aws_ebs_volume:                     { label: 'EBS Volume',        color: '#94a3b8', icon: '💾', group: 'Storage & Data' },
-  aws_rds_instance:                   { label: 'RDS Instance',      color: '#fb923c', icon: '🗄️', group: 'Storage & Data' },
-  aws_rds_cluster:                    { label: 'Aurora Cluster',    color: '#f97316', icon: '🗄️', group: 'Storage & Data' },
-  aws_dynamodb_table:                 { label: 'DynamoDB',          color: '#fcd34d', icon: '📊', group: 'Storage & Data' },
-  aws_elasticache_cluster:            { label: 'ElastiCache',       color: '#a3e635', icon: '⚡', group: 'Storage & Data' },
-  aws_opensearch_domain:              { label: 'OpenSearch',        color: '#38bdf8', icon: '🔍', group: 'Storage & Data' },
-  aws_msk_cluster:                    { label: 'MSK Kafka',         color: '#f472b6', icon: '📨', group: 'Storage & Data' },
-  aws_kms_key:                        { label: 'KMS Key',           color: '#f87171', icon: '🔐', group: 'Security' },
-  aws_secretsmanager_secret:          { label: 'Secret',            color: '#ef4444', icon: '🔑', group: 'Security' },
-  aws_acm_certificate:                { label: 'Certificate',       color: '#fbbf24', icon: '📜', group: 'Security' },
-  aws_cloudtrail:                     { label: 'CloudTrail',        color: '#818cf8', icon: '👣', group: 'Security' },
-  aws_cloudwatch_alarm:               { label: 'CW Alarm',          color: '#a78bfa', icon: '🔔', group: 'Security' },
-  aws_sns_topic:                      { label: 'SNS Topic',         color: '#c084fc', icon: '📣', group: 'Delivery' },
-  aws_sqs_queue:                      { label: 'SQS Queue',         color: '#d8b4fe', icon: '📬', group: 'Delivery' },
-  aws_api_gateway_rest_api:           { label: 'API GW (REST)',      color: '#f0abfc', icon: '🔗', group: 'Delivery' },
-  aws_apigatewayv2_api:               { label: 'API GW (HTTP)',      color: '#e879f9', icon: '🔗', group: 'Delivery' },
-  aws_sfn_state_machine:              { label: 'Step Functions',    color: '#86efac', icon: '⚙️', group: 'Delivery' },
-  aws_cloudfront_distribution:        { label: 'CloudFront',        color: '#7dd3fc', icon: '🌍', group: 'Delivery' },
-  aws_ecr_repository:                 { label: 'ECR Repo',          color: '#6ee7b7', icon: '📦', group: 'Delivery' },
+// ─── Compliance Colors ───────────────────────────────────────────────────────
+const C = {
+  pass:    { border: "#22c55e", bg: "#052e16", badge: "#22c55e", text: "PASS" },
+  fail:    { border: "#ef4444", bg: "#2d0a0a", badge: "#ef4444", text: "FAIL" },
+  warn:    { border: "#f59e0b", bg: "#2d1b00", badge: "#f59e0b", text: "WARN" },
+  unknown: { border: "#334155", bg: "#0f172a", badge: "#475569", text: "—"    },
 };
-const getMeta = (t) => TYPE_META[t] || { label: (t||'').replace('aws_','').replace(/_/g,' '), color: '#64748b', icon: '☁️', group: 'Other' };
+const cs = (compliance) => {
+  const s = (compliance?.status || "unknown").toLowerCase();
+  return C[s] || C.unknown;
+};
 
-const POSTURE_COLOR = { COMPLIANT: '#10b981', PARTIAL: '#f59e0b', 'NON-COMPLIANT': '#ef4444' };
-const POSTURE_ICON  = { COMPLIANT: '✅', PARTIAL: '⚠️', 'NON-COMPLIANT': '❌' };
+// ─── Type metadata ───────────────────────────────────────────────────────────
+const TM = {
+  account:                    { icon: "🔑", label: "Account",        color: "#60a5fa" },
+  region:                     { icon: "🌍", label: "Region",         color: "#34d399" },
+  iam_group:                  { icon: "👥", label: "IAM",            color: "#c084fc" },
+  global_group:               { icon: "🌐", label: "Global",         color: "#22d3ee" },
+  aws_vpc:                    { icon: "🔷", label: "VPC",            color: "#06b6d4" },
+  aws_subnet:                 { icon: "📦", label: "Subnet",         color: "#0ea5e9" },
+  aws_security_group:         { icon: "🛡️", label: "Security Group", color: "#fb923c" },
+  aws_internet_gateway:       { icon: "🌐", label: "IGW",            color: "#38bdf8" },
+  aws_ec2_instance:           { icon: "💻", label: "EC2",            color: "#34d399" },
+  aws_lambda_function:        { icon: "⚡", label: "Lambda",         color: "#a3e635" },
+  aws_s3_bucket:              { icon: "🪣", label: "S3 Bucket",      color: "#60a5fa" },
+  aws_rds_instance:           { icon: "🗄️", label: "RDS",            color: "#f472b6" },
+  aws_rds_cluster:            { icon: "🗄️", label: "RDS Cluster",    color: "#f472b6" },
+  aws_dynamodb_table:         { icon: "📊", label: "DynamoDB",       color: "#fb923c" },
+  aws_iam_user:               { icon: "👤", label: "IAM User",       color: "#c084fc" },
+  aws_iam_role:               { icon: "🎭", label: "IAM Role",       color: "#a78bfa" },
+  aws_iam_policy:             { icon: "📋", label: "Policy",         color: "#818cf8" },
+  aws_kms_key:                { icon: "🔐", label: "KMS Key",        color: "#fb923c" },
+  aws_cloudtrail:             { icon: "📝", label: "CloudTrail",     color: "#fbbf24" },
+  aws_cloudwatch_alarm:       { icon: "🔔", label: "CloudWatch",     color: "#f59e0b" },
+  aws_secretsmanager_secret:  { icon: "🔒", label: "Secret",         color: "#f87171" },
+  aws_eks_cluster:            { icon: "☸️", label: "EKS",            color: "#38bdf8" },
+  aws_ecs_cluster:            { icon: "🐳", label: "ECS",            color: "#0ea5e9" },
+  aws_elb:                    { icon: "⚖️", label: "Load Balancer",  color: "#22d3ee" },
+  aws_lb:                     { icon: "⚖️", label: "Load Balancer",  color: "#22d3ee" },
+  aws_acm_certificate:        { icon: "📜", label: "Certificate",    color: "#a3e635" },
+  aws_sqs_queue:              { icon: "📨", label: "SQS",            color: "#f59e0b" },
+  aws_sns_topic:              { icon: "📣", label: "SNS",            color: "#fb923c" },
+  aws_ebs_volume:             { icon: "💾", label: "EBS Volume",     color: "#60a5fa" },
+  aws_cloudfront_distribution:{ icon: "🚀", label: "CloudFront",     color: "#f472b6" },
+  default:                    { icon: "⬡",  label: "Resource",       color: "#94a3b8" },
+};
+const tm = (type) => TM[type] || TM.default;
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Inspector slide-in panel
-// ─────────────────────────────────────────────────────────────────────────────
-function Inspector({ node, onClose }) {
+// ─── Dagre auto-layout ───────────────────────────────────────────────────────
+function layout(nodes, edges, dir = "TB") {
+  const g = new dagre.graphlib.Graph();
+  g.setDefaultEdgeLabel(() => ({}));
+  g.setGraph({ rankdir: dir, ranksep: 90, nodesep: 55, marginx: 40, marginy: 40 });
+  nodes.forEach((n) => g.setNode(n.id, { width: n.width || 180, height: n.height || 65 }));
+  edges.forEach((e) => g.setEdge(e.source, e.target));
+  dagre.layout(g);
+  return nodes.map((n) => {
+    const p = g.node(n.id);
+    return { ...n, position: { x: p.x - (n.width || 180) / 2, y: p.y - (n.height || 65) / 2 } };
+  });
+}
+
+// ─── Shared edge factory ─────────────────────────────────────────────────────
+const edge = (id, source, target, color = "#1e293b", label = "", dashed = false) => ({
+  id, source, target, type: "smoothstep",
+  label, labelStyle: { fill: "#475569", fontSize: 9 },
+  style: { stroke: color, strokeWidth: 1.5, strokeDasharray: dashed ? "4 2" : undefined },
+  markerEnd: { type: MarkerType.ArrowClosed, color },
+});
+
+// ─── Custom Node: Account Root ───────────────────────────────────────────────
+function AccountNode({ data }) {
+  const score = data.score || 0;
+  const color = score >= 80 ? "#22c55e" : score >= 60 ? "#f59e0b" : "#ef4444";
+  const posture = data.posture || "UNKNOWN";
+  const borderColor = posture === "COMPLIANT" ? "#22c55e" : posture === "PARTIAL" ? "#f59e0b" : "#ef4444";
+  return (
+    <div style={{ background: "#07101f", border: `2px solid ${borderColor}`, borderRadius: 12, padding: "14px 18px", minWidth: 220, cursor: "pointer", boxShadow: `0 0 24px ${borderColor}25` }}>
+      <Handle type="source" position={Position.Bottom} style={{ opacity: 0 }} />
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+        <span style={{ fontSize: 24 }}>🔑</span>
+        <div style={{ flex: 1 }}>
+          <div style={{ color: "#f1f5f9", fontWeight: 700, fontSize: 13 }}>AWS Account</div>
+          <div style={{ color: "#94a3b8", fontSize: 10, fontFamily: "monospace" }}>{data.account_id || "—"}</div>
+        </div>
+        <span style={{ background: borderColor, color: "#000", borderRadius: 5, padding: "2px 8px", fontSize: 10, fontWeight: 700 }}>{posture}</span>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 5 }}>
+        {[
+          { label: "Resources", val: data.total_resources || 0, c: "#60a5fa" },
+          { label: "Violations", val: data.violations || 0, c: (data.violations || 0) > 0 ? "#ef4444" : "#22c55e" },
+          { label: "Score", val: `${score}%`, c: color },
+        ].map(({ label, val, c }) => (
+          <div key={label} style={{ background: "#0c1828", borderRadius: 7, padding: "5px 6px", textAlign: "center" }}>
+            <div style={{ color: c, fontSize: 13, fontWeight: 700 }}>{val}</div>
+            <div style={{ color: "#475569", fontSize: 9 }}>{label}</div>
+          </div>
+        ))}
+      </div>
+      {data.cloudtrail_enabled != null && (
+        <div style={{ marginTop: 8, display: "flex", gap: 6 }}>
+          <span style={{ fontSize: 9, padding: "2px 6px", borderRadius: 3, background: data.cloudtrail_enabled ? "#052e16" : "#2d0a0a", color: data.cloudtrail_enabled ? "#22c55e" : "#ef4444" }}>
+            {data.cloudtrail_enabled ? "✓ CloudTrail" : "✗ CloudTrail"}
+          </span>
+          {data.regions_active > 0 && (
+            <span style={{ fontSize: 9, padding: "2px 6px", borderRadius: 3, background: "#0c1828", color: "#34d399" }}>
+              {data.regions_active} regions
+            </span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Custom Node: Group (Region / IAM / Global / VPC) ───────────────────────
+function GroupNode({ data }) {
+  const meta = tm(data.nodeType || "default");
+  const isActive = data.active;
+  return (
+    <div style={{ background: "#07101f", border: `2px solid ${isActive ? meta.color : "#1e293b"}`, borderRadius: 10, padding: "9px 14px", minWidth: 165, cursor: "pointer", transition: "all 0.2s", boxShadow: isActive ? `0 0 14px ${meta.color}35` : "none" }}>
+      <Handle type="target" position={Position.Top}    style={{ opacity: 0 }} />
+      <Handle type="source" position={Position.Bottom} style={{ opacity: 0 }} />
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <span style={{ fontSize: 18 }}>{meta.icon}</span>
+        <div style={{ flex: 1, overflow: "hidden" }}>
+          <div style={{ color: "#f1f5f9", fontWeight: 700, fontSize: 12, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{data.label}</div>
+          {data.subtitle && <div style={{ color: "#475569", fontSize: 9 }}>{data.subtitle}</div>}
+        </div>
+        {(data.violations || 0) > 0 && (
+          <span style={{ background: "#ef444418", color: "#ef4444", borderRadius: 4, padding: "1px 5px", fontSize: 9, fontWeight: 700 }}>⚠ {data.violations}</span>
+        )}
+        {data.count != null && (
+          <span style={{ background: "#131f33", color: "#94a3b8", borderRadius: 4, padding: "1px 5px", fontSize: 9 }}>{data.count}</span>
+        )}
+        <span style={{ color: isActive ? meta.color : "#334155", fontSize: 11 }}>▸</span>
+      </div>
+      {data.badges?.length > 0 && (
+        <div style={{ display: "flex", gap: 4, marginTop: 6, flexWrap: "wrap" }}>
+          {data.badges.map((b, i) => (
+            <span key={i} style={{ fontSize: 8, padding: "1px 5px", borderRadius: 3, background: b.bg, color: b.color }}>{b.text}</span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Custom Node: Leaf Resource ──────────────────────────────────────────────
+function ResourceNode({ data }) {
+  const meta = tm(data.type);
+  const style = cs(data.compliance);
+  return (
+    <div style={{ background: style.bg, border: `1.5px solid ${style.border}`, borderRadius: 8, padding: "7px 10px", minWidth: 155, maxWidth: 185, cursor: "pointer" }}>
+      <Handle type="target" position={Position.Top}    style={{ opacity: 0 }} />
+      <Handle type="source" position={Position.Bottom} style={{ opacity: 0 }} />
+      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        <span style={{ fontSize: 14 }}>{meta.icon}</span>
+        <div style={{ flex: 1, overflow: "hidden" }}>
+          <div style={{ color: "#f1f5f9", fontWeight: 600, fontSize: 11, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{data.label}</div>
+          <div style={{ color: "#94a3b8", fontSize: 9 }}>{meta.label}</div>
+        </div>
+        <span style={{ background: style.badge, color: "#000", borderRadius: 3, padding: "1px 5px", fontSize: 8, fontWeight: 700, flexShrink: 0 }}>{style.text}</span>
+      </div>
+      {data.compliance?.findings?.[0] && (
+        <div style={{ marginTop: 4, color: "#f87171", fontSize: 9, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+          ⚠ {data.compliance.findings[0].title}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Custom Node: VPC ────────────────────────────────────────────────────────
+function VpcNode({ data }) {
+  const style = cs(data.compliance);
+  const exposed = data.internet_exposed;
+  return (
+    <div style={{ background: "#060d1c", border: `2px solid ${exposed ? "#ef4444" : "#0ea5e9"}`, borderRadius: 10, padding: "9px 14px", minWidth: 175, cursor: "pointer" }}>
+      <Handle type="target" position={Position.Top}    style={{ opacity: 0 }} />
+      <Handle type="source" position={Position.Bottom} style={{ opacity: 0 }} />
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <span style={{ fontSize: 16 }}>🔷</span>
+        <div style={{ flex: 1, overflow: "hidden" }}>
+          <div style={{ color: "#f1f5f9", fontWeight: 700, fontSize: 12, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{data.label}</div>
+          <div style={{ color: "#475569", fontSize: 9, fontFamily: "monospace" }}>{data.cidr}</div>
+        </div>
+        {exposed
+          ? <span style={{ background: "#ef444420", color: "#ef4444", fontSize: 9, borderRadius: 3, padding: "1px 5px", fontWeight: 700 }}>PUBLIC</span>
+          : <span style={{ background: "#052e1650", color: "#22c55e", fontSize: 9, borderRadius: 3, padding: "1px 5px" }}>PRIVATE</span>
+        }
+      </div>
+      <div style={{ display: "flex", gap: 4, marginTop: 6 }}>
+        {data.subnet_count > 0 && <span style={{ fontSize: 8, padding: "1px 5px", borderRadius: 3, background: "#0c1828", color: "#94a3b8" }}>{data.subnet_count} subnets</span>}
+        {data.sg_count > 0 && <span style={{ fontSize: 8, padding: "1px 5px", borderRadius: 3, background: "#fb923c18", color: "#fb923c" }}>{data.sg_count} SGs</span>}
+      </div>
+    </div>
+  );
+}
+
+const nodeTypes = { accountNode: AccountNode, groupNode: GroupNode, resourceNode: ResourceNode, vpcNode: VpcNode };
+
+// ─── Graph builders ──────────────────────────────────────────────────────────
+
+function buildOverviewGraph(data, currentView) {
+  const nodes = [], edges_ = [];
+  const accId = "account-root";
+  const ol = data.org_layer || {};
+
+  nodes.push({
+    id: accId, type: "accountNode", width: 240, height: 120,
+    data: {
+      account_id: ol.account_id, posture: ol.posture, score: ol.score,
+      total_resources: ol.total_resources, violations: ol.violations,
+      cloudtrail_enabled: ol.cloudtrail_enabled, regions_active: ol.regions_active,
+    },
+    position: { x: 0, y: 0 },
+  });
+
+  // IAM group
+  const iam = data.evidence?.["Identity & Access"] || {};
+  nodes.push({
+    id: "g-iam", type: "groupNode", width: 175, height: 65,
+    data: {
+      label: "Identity & Access", nodeType: "iam_group",
+      subtitle: `${iam.count || 0} principals`, count: iam.count || 0,
+      violations: iam.violations || 0, active: currentView === "iam",
+      badges: iam.violations > 0 ? [{ text: "Has Violations", bg: "#2d0a0a", color: "#ef4444" }] : [],
+    },
+    position: { x: 0, y: 0 },
+  });
+  edges_.push(edge("e-acc-iam", accId, "g-iam", "#c084fc"));
+
+  // Region groups
+  (data.regions || []).forEach((r, i) => {
+    const id = `g-reg-${r.name}`;
+    nodes.push({
+      id, type: "groupNode", width: 175, height: 65,
+      data: {
+        label: r.name, nodeType: "region",
+        subtitle: `${r.total || 0} resources · ${r.vpcs?.length || 0} VPCs`,
+        count: r.total || 0, violations: r.violations || 0,
+        active: currentView === `region:${r.name}`,
+        badges: [
+          r.cloudtrail
+            ? { text: "✓ CloudTrail", bg: "#052e16", color: "#22c55e" }
+            : { text: "✗ CloudTrail", bg: "#2d0a0a", color: "#ef4444" },
+        ],
+      },
+      position: { x: 0, y: 0 },
+    });
+    edges_.push(edge(`e-acc-reg-${i}`, accId, id, "#34d399"));
+  });
+
+  // Global group
+  const gCount = data.global_resources?.length || 0;
+  if (gCount > 0) {
+    const gViolations = (data.global_resources || []).filter(r => r.compliance?.status === "fail").length;
+    nodes.push({
+      id: "g-global", type: "groupNode", width: 175, height: 65,
+      data: {
+        label: "Global Resources", nodeType: "global_group",
+        subtitle: "S3, IAM, CloudFront", count: gCount, violations: gViolations,
+        active: currentView === "global",
+      },
+      position: { x: 0, y: 0 },
+    });
+    edges_.push(edge("e-acc-global", accId, "g-global", "#22d3ee"));
+  }
+
+  return { nodes: layout(nodes, edges_, "TB"), edges: edges_ };
+}
+
+function buildIAMGraph(evidence) {
+  const nodes = [], edges_ = [];
+  const resources = evidence?.["Identity & Access"]?.resources || [];
+  const users    = resources.filter(r => r.type === "aws_iam_user");
+  const roles    = resources.filter(r => r.type === "aws_iam_role");
+  const policies = resources.filter(r => r.type === "aws_iam_policy");
+
+  const addGroup = (id, label, count, violations) => {
+    nodes.push({ id, type: "groupNode", width: 165, height: 55, data: { label, nodeType: "iam_group", count, violations, active: true }, position: { x: 0, y: 0 } });
+  };
+
+  if (users.length) {
+    addGroup("h-users", "IAM Users", users.length, users.filter(u => u.compliance?.status === "fail").length);
+    users.forEach((u, i) => {
+      const id = `iam-u-${i}`;
+      nodes.push({ id, type: "resourceNode", width: 175, height: 65, data: { ...u }, position: { x: 0, y: 0 } });
+      edges_.push(edge(`e-uh-${i}`, "h-users", id, "#c084fc50"));
+    });
+  }
+  if (roles.length) {
+    addGroup("h-roles", "IAM Roles", roles.length, roles.filter(r => r.compliance?.status === "fail").length);
+    roles.forEach((r, i) => {
+      const id = `iam-r-${i}`;
+      nodes.push({ id, type: "resourceNode", width: 175, height: 65, data: { ...r }, position: { x: 0, y: 0 } });
+      edges_.push(edge(`e-rh-${i}`, "h-roles", id, "#a78bfa50"));
+    });
+  }
+  if (policies.length) {
+    addGroup("h-pols", "IAM Policies", policies.length, policies.filter(p => p.compliance?.status === "fail").length);
+    policies.slice(0, 20).forEach((p, i) => {
+      const id = `iam-p-${i}`;
+      nodes.push({ id, type: "resourceNode", width: 175, height: 65, data: { ...p }, position: { x: 0, y: 0 } });
+      edges_.push(edge(`e-ph-${i}`, "h-pols", id, "#818cf850"));
+    });
+  }
+
+  if (users.length && roles.length)   edges_.push(edge("e-u-r",   "h-users", "h-roles", "#475569", "assumes", true));
+  if (roles.length && policies.length) edges_.push(edge("e-r-p", "h-roles", "h-pols", "#475569", "has policy", true));
+
+  return { nodes: layout(nodes, edges_, "LR"), edges: edges_ };
+}
+
+function buildRegionGraph(region) {
+  if (!region) return { nodes: [], edges: [] };
+  const nodes = [], edges_ = [];
+  const regId = `reg-${region.name}`;
+
+  nodes.push({
+    id: regId, type: "groupNode", width: 185, height: 65,
+    data: {
+      label: region.name, nodeType: "region", active: true,
+      subtitle: `${region.total} resources · ${region.vpcs?.length || 0} VPCs`,
+      count: region.total, violations: region.violations,
+      badges: [region.cloudtrail
+        ? { text: "✓ CloudTrail", bg: "#052e16", color: "#22c55e" }
+        : { text: "✗ CloudTrail", bg: "#2d0a0a", color: "#ef4444" }],
+    },
+    position: { x: 0, y: 0 },
+  });
+
+  (region.vpcs || []).forEach((vpc, vi) => {
+    const vpcId = `vpc-${vi}`;
+    nodes.push({
+      id: vpcId, type: "vpcNode", width: 185, height: 80,
+      data: {
+        label: vpc.label || vpc.id, cidr: vpc.cidr,
+        internet_exposed: vpc.internet_exposed, compliance: vpc.compliance,
+        subnet_count: vpc.subnets?.length || 0, sg_count: vpc.sgs?.length || 0,
+      },
+      position: { x: 0, y: 0 },
+    });
+    edges_.push(edge(`e-rv-${vi}`, regId, vpcId, "#06b6d440"));
+
+    (vpc.subnets || []).forEach((sub, si) => {
+      const subId = `sub-${vi}-${si}`;
+      nodes.push({
+        id: subId, type: "groupNode", width: 175, height: 60,
+        data: {
+          label: sub.is_public ? "🔓 Public Subnet" : "🔒 Private Subnet",
+          nodeType: "aws_subnet", subtitle: `${sub.az} · ${sub.resources?.length || 0} res`,
+          count: sub.resources?.length || 0,
+          violations: (sub.resources || []).filter(r => r.compliance?.status === "fail").length,
+          active: true,
+        },
+        position: { x: 0, y: 0 },
+      });
+      edges_.push(edge(`e-vs-${vi}-${si}`, vpcId, subId, "#0ea5e930"));
+
+      (sub.resources || []).slice(0, 8).forEach((r, ri) => {
+        const rId = `sres-${vi}-${si}-${ri}`;
+        nodes.push({ id: rId, type: "resourceNode", width: 175, height: 65, data: { ...r }, position: { x: 0, y: 0 } });
+        edges_.push(edge(`e-sr-${rId}`, subId, rId, "#1e293b"));
+      });
+    });
+
+    (vpc.sgs || []).slice(0, 6).forEach((sg, si) => {
+      const sgId = `sg-${vi}-${si}`;
+      nodes.push({ id: sgId, type: "resourceNode", width: 175, height: 65, data: { ...sg }, position: { x: 0, y: 0 } });
+      edges_.push(edge(`e-vsg-${vi}-${si}`, vpcId, sgId, "#fb923c30"));
+    });
+
+    (vpc.igws || []).forEach((igw, ii) => {
+      const igwId = `igw-${vi}-${ii}`;
+      nodes.push({ id: igwId, type: "resourceNode", width: 175, height: 65, data: { ...igw }, position: { x: 0, y: 0 } });
+      edges_.push(edge(`e-vigw-${vi}-${ii}`, vpcId, igwId, "#38bdf830"));
+    });
+  });
+
+  (region.resources || []).slice(0, 25).forEach((r, ri) => {
+    const rId = `rres-${ri}`;
+    nodes.push({ id: rId, type: "resourceNode", width: 175, height: 65, data: { ...r }, position: { x: 0, y: 0 } });
+    edges_.push(edge(`e-rr-${ri}`, regId, rId, "#1e293b"));
+  });
+
+  return { nodes: layout(nodes, edges_, "TB"), edges: edges_ };
+}
+
+function buildGlobalGraph(globalResources) {
+  const nodes = [], edges_ = [];
+  nodes.push({
+    id: "g-root", type: "groupNode", width: 185, height: 65,
+    data: {
+      label: "Global Resources", nodeType: "global_group", active: true,
+      count: globalResources.length,
+      violations: globalResources.filter(r => r.compliance?.status === "fail").length,
+    },
+    position: { x: 0, y: 0 },
+  });
+
+  const byType = {};
+  globalResources.forEach(r => { (byType[r.type] = byType[r.type] || []).push(r); });
+
+  Object.entries(byType).forEach(([type, list], ti) => {
+    const meta = tm(type);
+    const typeId = `gt-${ti}`;
+    nodes.push({
+      id: typeId, type: "groupNode", width: 165, height: 55,
+      data: { label: meta.label, nodeType: type, count: list.length, violations: list.filter(r => r.compliance?.status === "fail").length, active: true },
+      position: { x: 0, y: 0 },
+    });
+    edges_.push(edge(`e-ggt-${ti}`, "g-root", typeId, `${meta.color}50`));
+
+    list.slice(0, 12).forEach((r, ri) => {
+      const rId = `gr-${ti}-${ri}`;
+      nodes.push({ id: rId, type: "resourceNode", width: 175, height: 65, data: { ...r }, position: { x: 0, y: 0 } });
+      edges_.push(edge(`e-gtr-${rId}`, typeId, rId, "#1e293b"));
+    });
+  });
+
+  return { nodes: layout(nodes, edges_, "TB"), edges: edges_ };
+}
+
+// ─── Inspector Panel ─────────────────────────────────────────────────────────
+function InspectorPanel({ node, attribution, onClose }) {
+  const [openSec, setOpenSec] = useState({ findings: true, trail: true, config: false, meta: true });
+  const toggle = (k) => setOpenSec(s => ({ ...s, [k]: !s[k] }));
   if (!node) return null;
-  const m    = getMeta(node.type);
-  const comp = node.compliance || {};
-  const fail = comp.status === 'fail';
+
+  const style = cs(node.data?.compliance);
+  const meta  = tm(node.data?.type || node.type || "default");
+
+  const relatedEvents = (attribution || []).filter(ev => {
+    const label = (node.data?.label || "").toLowerCase();
+    const type  = (node.data?.type  || "").replace("aws_", "").split("_")[0];
+    return (
+      (ev.username || "").toLowerCase().includes(label) ||
+      label.includes((ev.username || "").toLowerCase()) ||
+      (ev.event_name || "").toLowerCase().includes(type)
+    );
+  }).slice(0, 12);
+
+  const Sec = ({ k, title, children }) => (
+    <div style={{ marginBottom: 14 }}>
+      <button onClick={() => toggle(k)} style={{ background: "none", border: "none", cursor: "pointer", color: "#64748b", fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", padding: "0 0 6px 0", display: "flex", gap: 5, alignItems: "center" }}>
+        <span>{openSec[k] ? "▾" : "▸"}</span>{title}
+      </button>
+      {openSec[k] && children}
+    </div>
+  );
 
   return (
     <motion.div
-      initial={{ x: 400, opacity: 0 }} animate={{ x: 0, opacity: 1 }}
-      exit={{ x: 400, opacity: 0 }}
-      transition={{ type: 'spring', damping: 28, stiffness: 220 }}
+      initial={{ x: 390, opacity: 0 }}
+      animate={{ x: 0, opacity: 1 }}
+      exit={{ x: 390, opacity: 0 }}
+      transition={{ type: "spring", damping: 28, stiffness: 220 }}
       style={{
-        position: 'absolute', top: 0, right: 0, bottom: 0, width: 380,
-        background: '#07101f', borderLeft: '1px solid #1a2a4a',
-        display: 'flex', flexDirection: 'column', zIndex: 80,
-        boxShadow: '-20px 0 60px rgba(0,0,0,0.9)',
+        position: "absolute", right: 0, top: 0, bottom: 0, width: 365,
+        background: "#07101f", borderLeft: "1px solid #1a2a4a", zIndex: 80,
+        boxShadow: "-24px 0 60px rgba(0,0,0,0.9)", display: "flex", flexDirection: "column",
       }}
     >
       {/* Header */}
-      <div style={{ padding: '18px 20px 14px', borderBottom: '1px solid #1a2a4a', flexShrink: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 12 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div style={{ width: 42, height: 42, borderRadius: 11, background: `${m.color}15`, border: `2px solid ${m.color}40`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 19 }}>{m.icon}</div>
-            <div>
-              <div style={{ color: '#f1f5f9', fontSize: 13, fontWeight: 700, maxWidth: 220, wordBreak: 'break-all', lineHeight: 1.4 }}>{node.label}</div>
-              <div style={{ display: 'flex', gap: 6, marginTop: 3 }}>
-                <span style={{ color: m.color, fontSize: 11, fontWeight: 600 }}>{m.label}</span>
-                <span style={{ color: '#2a3a56' }}>·</span>
-                <span style={{ color: '#475569', fontSize: 11 }}>{node.region || 'global'}</span>
+      <div style={{ padding: "14px 16px", borderBottom: "1px solid #1a2a4a", background: "#050d1a", flexShrink: 0 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+          <div style={{ display: "flex", gap: 10, alignItems: "center", maxWidth: 300 }}>
+            <span style={{ fontSize: 22 }}>{meta.icon}</span>
+            <div style={{ overflow: "hidden" }}>
+              <div style={{ color: "#f1f5f9", fontWeight: 700, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {node.data?.label || node.id}
               </div>
+              <div style={{ color: "#475569", fontSize: 10 }}>{meta.label}</div>
             </div>
           </div>
-          <button onClick={onClose} style={{ background: '#121f36', border: '1px solid #1a2a4a', color: '#475569', width: 28, height: 28, borderRadius: 8, cursor: 'pointer', fontSize: 16, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>×</button>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "#475569", fontSize: 20, lineHeight: 1, paddingTop: 2 }}>✕</button>
         </div>
-
-        {/* Compliance badge */}
-        <div style={{ padding: '9px 13px', borderRadius: 9, background: fail ? 'rgba(239,68,68,0.07)' : 'rgba(16,185,129,0.07)', border: `1px solid ${fail ? '#ef444428' : '#10b98128'}`, display: 'flex', alignItems: 'center', gap: 9 }}>
-          <span style={{ fontSize: 16 }}>{fail ? '⚠️' : comp.status === 'unknown' ? '❓' : '✅'}</span>
-          <div>
-            <div style={{ color: fail ? '#ef4444' : comp.status === 'unknown' ? '#94a3b8' : '#10b981', fontSize: 12, fontWeight: 700 }}>
-              {fail ? `${comp.failed} Check${comp.failed !== 1 ? 's' : ''} Failed` : comp.status === 'unknown' ? 'Not Evaluated' : 'Compliant'}
-            </div>
-            {comp.critical > 0 && <div style={{ color: '#fca5a5', fontSize: 10 }}>{comp.critical} critical/high severity</div>}
-          </div>
+        <div style={{ marginTop: 10, padding: "8px 10px", background: style.bg, border: `1px solid ${style.border}`, borderRadius: 8, display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ background: style.badge, color: "#000", borderRadius: 4, padding: "2px 8px", fontSize: 10, fontWeight: 700 }}>{style.text}</span>
+          {(node.data?.compliance?.failed || 0) > 0
+            ? <span style={{ color: "#f87171", fontSize: 11 }}>{node.data.compliance.failed} failing check{node.data.compliance.failed > 1 ? "s" : ""}</span>
+            : node.data?.compliance?.status === "pass"
+              ? <span style={{ color: "#22c55e", fontSize: 11 }}>All checks passed ✓</span>
+              : <span style={{ color: "#94a3b8", fontSize: 11 }}>No compliance data</span>
+          }
         </div>
       </div>
 
       {/* Body */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '14px 20px' }}>
-        {/* Failed findings */}
-        {comp.findings?.filter(f => f.status === 'FAIL').length > 0 && (
-          <>
-            <SLabel>Compliance Findings</SLabel>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 12 }}>
-              {comp.findings.filter(f => f.status === 'FAIL').map((f, i) => (
-                <div key={i} style={{ padding: '7px 10px', borderRadius: 8, background: 'rgba(239,68,68,0.06)', border: '1px solid #ef444425' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span style={{ color: f.severity === 'CRITICAL' ? '#ef4444' : f.severity === 'HIGH' ? '#f97316' : '#f59e0b', fontSize: 10, fontWeight: 700, flexShrink: 0 }}>{f.severity || 'MEDIUM'}</span>
-                    <span style={{ color: '#94a3b8', fontSize: 11 }}>{f.rule_id}</span>
-                  </div>
-                  <div style={{ color: '#cbd5e1', fontSize: 11, marginTop: 3 }}>{f.title}</div>
+      <div style={{ flex: 1, overflowY: "auto", padding: "14px 16px" }}>
+
+        {/* Compliance findings */}
+        <Sec k="findings" title={`Compliance Findings (${node.data?.compliance?.findings?.length || 0})`}>
+          {(node.data?.compliance?.findings || []).length === 0
+            ? <div style={{ color: "#475569", fontSize: 11, padding: "4px 0 8px" }}>No findings</div>
+            : (node.data.compliance.findings).map((f, i) => (
+              <div key={i} style={{ background: "#0c1828", borderRadius: 7, padding: 8, marginBottom: 6, borderLeft: `3px solid ${f.status === "FAIL" ? "#ef4444" : "#f59e0b"}` }}>
+                <div style={{ color: "#f1f5f9", fontSize: 11, fontWeight: 600 }}>{f.title}</div>
+                <div style={{ display: "flex", gap: 6, marginTop: 3 }}>
+                  <span style={{ color: "#475569", fontSize: 9 }}>{f.rule_id}</span>
+                  <span style={{ color: f.severity === "CRITICAL" || f.severity === "HIGH" ? "#ef4444" : "#f59e0b", fontSize: 9, fontWeight: 700 }}>{f.severity}</span>
                 </div>
-              ))}
+              </div>
+            ))
+          }
+        </Sec>
+
+        {/* CloudTrail */}
+        <Sec k="trail" title={`CloudTrail Activity (${relatedEvents.length})`}>
+          {relatedEvents.length === 0
+            ? <div style={{ color: "#475569", fontSize: 11, padding: "4px 0 8px" }}>No related events</div>
+            : relatedEvents.map((ev, i) => (
+              <div key={i} style={{ background: ev.is_suspicious ? "#2d0a0a" : "#0c1828", borderRadius: 7, padding: "7px 8px", marginBottom: 5, borderLeft: `3px solid ${ev.is_suspicious ? "#ef4444" : "#1e293b"}` }}>
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                  <span style={{ color: ev.is_suspicious ? "#ef4444" : "#f1f5f9", fontSize: 11, fontWeight: 600 }}>{ev.event_name}</span>
+                  {ev.is_suspicious && <span style={{ color: "#ef4444", fontSize: 9, fontWeight: 700 }}>⚠ SUSPICIOUS</span>}
+                </div>
+                <div style={{ color: "#94a3b8", fontSize: 9, marginTop: 3 }}>
+                  👤 {ev.username || "Unknown"} · 📍 {ev.region || "—"}
+                </div>
+                {ev.event_time && (
+                  <div style={{ color: "#475569", fontSize: 8, marginTop: 2 }}>
+                    {new Date(ev.event_time).toLocaleString()}
+                    {ev.source_ip && ` · ${ev.source_ip}`}
+                  </div>
+                )}
+              </div>
+            ))
+          }
+        </Sec>
+
+        {/* Config */}
+        {node.data?.config && Object.keys(node.data.config).length > 0 && (
+          <Sec k="config" title="Configuration">
+            <pre style={{ background: "#0c1828", padding: 8, borderRadius: 7, fontSize: 9, overflow: "auto", maxHeight: 200, color: "#7dd3fc", margin: 0, lineHeight: 1.5 }}>
+              {JSON.stringify(node.data.config, null, 2)}
+            </pre>
+          </Sec>
+        )}
+
+        {/* Metadata */}
+        <Sec k="meta" title="Metadata">
+          {[
+            { k: "Node ID", v: node.id },
+            { k: "Type",    v: node.data?.type },
+            { k: "Region",  v: node.data?.region },
+          ].filter(x => x.v).map(({ k, v }) => (
+            <div key={k} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "5px 0", borderBottom: "1px solid #0f172a" }}>
+              <span style={{ color: "#475569", fontSize: 10 }}>{k}</span>
+              <span style={{ color: "#cbd5e1", fontSize: 10, fontFamily: "monospace", maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis" }}>{v}</span>
             </div>
-          </>
-        )}
-
-        <SLabel>Identity</SLabel>
-        <SCard><KV k="ID" v={node.id} mono /><KV k="Type" v={node.type} /><KV k="Region" v={node.region || 'global'} /></SCard>
-
-        {node.config && Object.keys(node.config).length > 0 && (
-          <>
-            <SLabel style={{ marginTop: 12 }}>Configuration</SLabel>
-            <SCard>
-              {Object.entries(node.config).filter(([,v]) => v !== '' && v !== null && v !== undefined).slice(0, 14).map(([k, v]) => (
-                <KV key={k} k={k.replace(/_/g, ' ')} v={typeof v === 'object' ? JSON.stringify(v).slice(0, 70) : String(v ?? '—').slice(0, 90)} />
-              ))}
-            </SCard>
-          </>
-        )}
+          ))}
+        </Sec>
       </div>
     </motion.div>
   );
 }
 
-const SLabel = ({ children, style }) => <div style={{ color: '#2a3a56', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '1.1px', marginBottom: 6, ...style }}>{children}</div>;
-const SCard  = ({ children }) => <div style={{ background: '#060e1c', borderRadius: 8, border: '1px solid #131f33', overflow: 'hidden', marginBottom: 4 }}>{children}</div>;
-const KV     = ({ k, v, mono }) => (
-  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, padding: '6px 11px', borderBottom: '1px solid #0c1828' }}>
-    <span style={{ color: '#374151', fontSize: 11, flexShrink: 0 }}>{k}</span>
-    <span style={{ color: mono ? '#7dd3fc' : '#6b7280', fontSize: 11, fontFamily: mono ? 'monospace' : 'inherit', textAlign: 'right', wordBreak: 'break-all', maxWidth: 195 }}>{v ?? '—'}</span>
-  </div>
-);
+// ─── Left Tree Explorer ──────────────────────────────────────────────────────
+function TreeExplorer({ data, currentView, onNavigate }) {
+  const [open, setOpen] = useState(new Set(["regions"]));
+  const tog = (k) => setOpen(p => { const s = new Set(p); s.has(k) ? s.delete(k) : s.add(k); return s; });
+  const ol = data?.org_layer || {};
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Resource chip — compact clickable card
-// ─────────────────────────────────────────────────────────────────────────────
-function ResourceChip({ node, onClick, size = 'md' }) {
-  const m    = getMeta(node.type);
-  const fail = node.compliance?.status === 'fail';
-  const lbl  = (node.label || '').length > 20 ? node.label.slice(0, 18) + '…' : (node.label || node.id?.slice(-8));
-  const pad  = size === 'sm' ? '3px 7px' : '5px 10px';
-  const fs   = size === 'sm' ? 10 : 11;
-
-  return (
+  const Item = ({ icon, label, count, violations, onClick, active, indent = 0 }) => (
     <div
-      onClick={() => onClick(node)}
-      title={node.label}
+      onClick={onClick}
       style={{
-        display: 'inline-flex', alignItems: 'center', gap: 5,
-        padding: pad, borderRadius: 7, cursor: 'pointer',
-        background: fail ? 'rgba(239,68,68,0.07)' : `${m.color}0d`,
-        border: `1px solid ${fail ? '#ef444440' : m.color + '35'}`,
-        transition: 'all 0.13s', position: 'relative', flexShrink: 0,
-        boxShadow: fail ? '0 0 8px rgba(239,68,68,0.12)' : 'none',
+        display: "flex", alignItems: "center", gap: 7,
+        padding: `5px ${10 + indent * 14}px`,
+        cursor: "pointer", borderRadius: 5, margin: "1px 5px",
+        background: active ? "#0f1f3a" : "transparent",
+        color: active ? "#60a5fa" : "#94a3b8", fontSize: 12,
       }}
-      onMouseEnter={e => { e.currentTarget.style.background = fail ? 'rgba(239,68,68,0.13)' : `${m.color}1a`; e.currentTarget.style.transform = 'translateY(-1px)'; }}
-      onMouseLeave={e => { e.currentTarget.style.background = fail ? 'rgba(239,68,68,0.07)' : `${m.color}0d`; e.currentTarget.style.transform = 'none'; }}
+      onMouseEnter={e => { if (!active) e.currentTarget.style.background = "#0a1525"; }}
+      onMouseLeave={e => { if (!active) e.currentTarget.style.background = "transparent"; }}
     >
-      <span style={{ fontSize: fs + 2, flexShrink: 0 }}>{m.icon}</span>
-      <div>
-        <div style={{ color: fail ? '#fca5a5' : '#cbd5e1', fontSize: fs, fontWeight: 500, lineHeight: 1.2 }}>{lbl}</div>
-        {size !== 'sm' && <div style={{ color: m.color, fontSize: 9 }}>{m.label}</div>}
-      </div>
-      {fail && (
-        <div style={{ position: 'absolute', top: -3, right: -3, width: 8, height: 8, borderRadius: '50%', background: '#ef4444', border: '1.5px solid #07101f', boxShadow: '0 0 5px #ef4444' }} />
-      )}
+      <span style={{ fontSize: 13 }}>{icon}</span>
+      <span style={{ flex: 1 }}>{label}</span>
+      {(violations || 0) > 0 && <span style={{ color: "#ef4444", fontSize: 9 }}>⚠{violations}</span>}
+      {count != null && <span style={{ color: "#334155", fontSize: 9, background: "#0c1828", borderRadius: 3, padding: "1px 5px" }}>{count}</span>}
     </div>
   );
-}
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Subnet box inside a VPC
-// ─────────────────────────────────────────────────────────────────────────────
-function SubnetBox({ subnet, onClick }) {
-  const isPub = subnet.is_public;
-  const resources = subnet.resources || [];
-  const fail = subnet.compliance?.status === 'fail';
-  return (
-    <div style={{
-      border: `1px dashed ${isPub ? '#38bdf840' : '#6ee7b730'}`,
-      borderRadius: 9, padding: '7px 9px', minWidth: 150,
-      background: isPub ? 'rgba(56,189,248,0.03)' : 'rgba(110,231,183,0.02)',
-      flex: '1 1 150px',
-    }}>
-      <div onClick={() => onClick(subnet)} style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 6, cursor: 'pointer' }}>
-        <span style={{ color: isPub ? '#38bdf8' : '#6ee7b7', fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.7px' }}>{isPub ? '🌐 PUBLIC' : '🔒 PRIVATE'}</span>
-        {subnet.az && <span style={{ color: '#1e3a5f', fontSize: 9, marginLeft: 'auto' }}>{subnet.az}</span>}
-        {fail && <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#ef4444', boxShadow: '0 0 4px #ef4444', flexShrink: 0 }} />}
-      </div>
-      {resources.length > 0
-        ? <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>{resources.map(r => <ResourceChip key={r.id} node={r} onClick={onClick} size="sm" />)}</div>
-        : <div style={{ color: '#1e2e45', fontSize: 9, textAlign: 'center', padding: '4px 0' }}>empty</div>
-      }
-    </div>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// VPC zone block
-// ─────────────────────────────────────────────────────────────────────────────
-function VpcZone({ vpc, onClick }) {
-  const fail    = vpc.compliance?.status === 'fail';
-  const subnets = vpc.subnets  || [];
-  const unplaced = vpc.unplaced || [];
-  const igws    = vpc.igws     || [];
-  const sgs     = vpc.sgs      || [];
-  const [collapsed, setCollapsed] = useState(subnets.length > 6);
+  const scoreColor = ol.score >= 80 ? "#22c55e" : ol.score >= 60 ? "#f59e0b" : "#ef4444";
 
   return (
-    <div style={{
-      border: `1px solid ${fail ? '#ef444440' : '#22d3ee20'}`,
-      borderRadius: 12, padding: '10px 12px',
-      background: 'rgba(34,211,238,0.02)',
-      boxShadow: fail ? '0 0 16px rgba(239,68,68,0.07)' : 'none',
-      minWidth: 280,
-    }}>
-      {/* VPC header */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 8, flexWrap: 'wrap' }}>
-        <div onClick={() => onClick(vpc)} style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', padding: '3px 9px', borderRadius: 7, background: fail ? 'rgba(239,68,68,0.08)' : 'rgba(34,211,238,0.08)', border: `1px solid ${fail ? '#ef444435' : '#22d3ee28'}` }}>
-          <span style={{ fontSize: 13 }}>🌐</span>
-          <div>
-            <div style={{ color: fail ? '#ef4444' : '#22d3ee', fontSize: 11, fontWeight: 700 }}>{(vpc.label || '').length > 24 ? vpc.label.slice(0,22)+'…' : vpc.label}</div>
-            {vpc.cidr && <div style={{ color: '#374151', fontSize: 9 }}>{vpc.cidr}</div>}
-          </div>
-          {fail && <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#ef4444', boxShadow: '0 0 4px #ef4444' }} />}
+    <div style={{ width: 215, background: "#050d1a", borderRight: "1px solid #131f33", display: "flex", flexDirection: "column", flexShrink: 0 }}>
+      {/* Account summary */}
+      <div style={{ padding: "12px", borderBottom: "1px solid #131f33", flexShrink: 0 }}>
+        <div style={{ color: "#475569", fontSize: 9, textTransform: "uppercase", fontWeight: 700, marginBottom: 4 }}>Explorer</div>
+        <div style={{ color: "#f1f5f9", fontSize: 12, fontWeight: 700, fontFamily: "monospace" }}>{ol.account_id || "No Scan Data"}</div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 5, marginTop: 8 }}>
+          {[
+            { v: `${ol.score || 0}%`, c: scoreColor, l: "Score" },
+            { v: ol.violations || 0, c: (ol.violations || 0) > 0 ? "#ef4444" : "#22c55e", l: "Fails" },
+            { v: ol.total_resources || 0, c: "#60a5fa", l: "Total" },
+          ].map(({ v, c, l }) => (
+            <div key={l} style={{ background: "#0c1828", borderRadius: 6, padding: "4px 5px", textAlign: "center" }}>
+              <div style={{ color: c, fontSize: 11, fontWeight: 700 }}>{v}</div>
+              <div style={{ color: "#334155", fontSize: 8 }}>{l}</div>
+            </div>
+          ))}
         </div>
-        {vpc.internet_exposed && <span style={{ color: '#38bdf8', fontSize: 9, fontWeight: 700, padding: '2px 7px', borderRadius: 5, background: 'rgba(56,189,248,0.1)', border: '1px solid #38bdf830' }}>🔌 INTERNET</span>}
-        {igws.map(ig => (
-          <div key={ig.id} onClick={() => onClick(ig)} style={{ display: 'flex', alignItems: 'center', gap: 3, cursor: 'pointer', padding: '2px 7px', borderRadius: 5, background: 'rgba(56,189,248,0.08)', border: '1px solid #38bdf825', color: '#38bdf8', fontSize: 9, fontWeight: 600 }}>
-            🔌 IGW {ig.compliance?.status === 'fail' && <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#ef4444', display: 'inline-block' }} />}
+      </div>
+
+      <div style={{ flex: 1, overflowY: "auto", paddingTop: 4 }}>
+        <Item icon="🔑" label="Account Overview" onClick={() => onNavigate("overview")} active={currentView === "overview"} />
+
+        <Item
+          icon="👥" label="Identity & Access"
+          count={data?.evidence?.["Identity & Access"]?.count}
+          violations={data?.evidence?.["Identity & Access"]?.violations}
+          onClick={() => onNavigate("iam")}
+          active={currentView === "iam"}
+        />
+
+        <div style={{ padding: "8px 10px 3px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <span style={{ color: "#334155", fontSize: 9, textTransform: "uppercase", fontWeight: 700 }}>Regions</span>
+          <button onClick={() => tog("regions")} style={{ background: "none", border: "none", cursor: "pointer", color: "#334155", fontSize: 10 }}>
+            {open.has("regions") ? "▾" : "▸"}
+          </button>
+        </div>
+        {open.has("regions") && (data?.regions || []).map((r) => (
+          <div key={r.name}>
+            <Item
+              icon={r.cloudtrail ? "🌍" : "🌐"} label={r.name}
+              count={r.total} violations={r.violations}
+              onClick={() => onNavigate(`region:${r.name}`)}
+              active={currentView === `region:${r.name}`}
+            />
+            {currentView === `region:${r.name}` && (r.vpcs || []).map((vpc, vi) => (
+              <Item key={vi} icon="🔷" label={vpc.label || vpc.id} count={(vpc.subnets || []).length} violations={vpc.internet_exposed ? 1 : 0} onClick={() => onNavigate(`region:${r.name}`)} indent={1} active={false} />
+            ))}
           </div>
         ))}
-      </div>
 
-      {/* SGs */}
-      {sgs.length > 0 && (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, padding: '5px 7px', marginBottom: 7, borderRadius: 7, background: 'rgba(245,158,11,0.04)', border: '1px dashed #f59e0b22' }}>
-          <span style={{ color: '#f59e0b', fontSize: 8, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.7px', alignSelf: 'center', marginRight: 3 }}>SGs</span>
-          {sgs.map(sg => <ResourceChip key={sg.id} node={sg} onClick={onClick} size="sm" />)}
-        </div>
-      )}
-
-      {/* Subnets */}
-      {subnets.length > 0 && (
-        <>
-          <div onClick={() => setCollapsed(c => !c)} style={{ display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer', marginBottom: 5 }}>
-            <span style={{ color: '#1e3a5f', fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.7px' }}>Subnets ({subnets.length})</span>
-            <span style={{ color: '#1e3a5f', fontSize: 9 }}>{collapsed ? '▶' : '▼'}</span>
-          </div>
-          {!collapsed && (
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: unplaced.length > 0 ? 7 : 0 }}>
-              {subnets.map(sub => <SubnetBox key={sub.id} subnet={sub} onClick={onClick} />)}
+        {(data?.global_resources?.length || 0) > 0 && (
+          <>
+            <div style={{ padding: "8px 10px 3px" }}>
+              <span style={{ color: "#334155", fontSize: 9, textTransform: "uppercase", fontWeight: 700 }}>Global</span>
             </div>
-          )}
-        </>
-      )}
-
-      {/* Unplaced */}
-      {unplaced.length > 0 && (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, padding: '5px 7px', borderRadius: 7, background: 'rgba(52,211,153,0.03)', border: '1px dashed #34d39918' }}>
-          <span style={{ color: '#34d399', fontSize: 8, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.7px', alignSelf: 'center', marginRight: 3 }}>Compute</span>
-          {unplaced.map(r => <ResourceChip key={r.id} node={r} onClick={onClick} size="sm" />)}
-        </div>
-      )}
+            <Item
+              icon="🌐" label="Global Resources"
+              count={data.global_resources?.length}
+              violations={data.global_resources?.filter(r => r.compliance?.status === "fail").length}
+              onClick={() => onNavigate("global")}
+              active={currentView === "global"}
+            />
+          </>
+        )}
+      </div>
     </div>
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Region card
-// ─────────────────────────────────────────────────────────────────────────────
-function RegionCard({ region, onClick, expanded, onToggle }) {
-  const hasViolations = region.violations > 0;
-  const compliancePct = region.total > 0 ? Math.round(((region.total - region.violations) / region.total) * 100) : 100;
-
+// ─── CloudTrail Timeline (bottom strip) ─────────────────────────────────────
+function CloudTrailTimeline({ events }) {
+  if (!events?.length) return null;
+  const suspicious = events.filter(e => e.is_suspicious).length;
   return (
-    <div style={{
-      border: `1px solid ${hasViolations ? '#ef444430' : '#22d3ee18'}`,
-      borderRadius: 14, overflow: 'hidden',
-      background: '#050d1a',
-      boxShadow: hasViolations ? '0 0 20px rgba(239,68,68,0.05)' : 'none',
-    }}>
-      {/* Region header — always visible */}
-      <div
-        onClick={onToggle}
-        style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 14px', cursor: 'pointer', borderBottom: expanded ? '1px solid #131f33' : 'none' }}
-      >
-        <div style={{ width: 8, height: 8, borderRadius: '50%', background: hasViolations ? '#ef4444' : '#10b981', boxShadow: `0 0 6px ${hasViolations ? '#ef4444' : '#10b981'}`, flexShrink: 0 }} />
-        <span style={{ color: '#f1f5f9', fontSize: 13, fontWeight: 700, flex: 1 }}>{region.name}</span>
-
-        {/* Stats row */}
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <span style={{ color: '#374151', fontSize: 11 }}>{region.total} resources</span>
-          {region.vpcs?.length > 0 && <span style={{ color: '#22d3ee', fontSize: 11 }}>🌐 {region.vpcs.length} VPC{region.vpcs.length !== 1 ? 's' : ''}</span>}
-          {hasViolations && <span style={{ color: '#ef4444', fontSize: 11, fontWeight: 700 }}>⚠ {region.violations} fail</span>}
-          {region.cloudtrail
-            ? <span style={{ color: '#818cf8', fontSize: 10, padding: '1px 6px', borderRadius: 5, background: 'rgba(129,140,248,0.1)', border: '1px solid #818cf825' }}>CT ✓</span>
-            : <span style={{ color: '#ef4444', fontSize: 10, padding: '1px 6px', borderRadius: 5, background: 'rgba(239,68,68,0.08)', border: '1px solid #ef444425' }}>CT ✗</span>
-          }
-          {/* mini compliance bar */}
-          <div style={{ width: 50, height: 5, borderRadius: 3, background: '#0c1828', overflow: 'hidden' }}>
-            <div style={{ height: '100%', width: `${compliancePct}%`, background: compliancePct >= 80 ? '#10b981' : compliancePct >= 60 ? '#f59e0b' : '#ef4444', borderRadius: 3, transition: 'width 0.4s' }} />
-          </div>
-        </div>
-        <span style={{ color: '#1e3a5f', fontSize: 11, marginLeft: 4 }}>{expanded ? '▲' : '▼'}</span>
+    <div style={{ height: 155, background: "#050d1a", borderTop: "1px solid #131f33", flexShrink: 0, display: "flex", flexDirection: "column" }}>
+      <div style={{ padding: "6px 12px", borderBottom: "1px solid #131f33", display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+        <span style={{ fontSize: 13 }}>📝</span>
+        <span style={{ color: "#94a3b8", fontSize: 10, fontWeight: 700, textTransform: "uppercase" }}>CloudTrail Activity</span>
+        <span style={{ background: "#131f33", color: "#94a3b8", borderRadius: 4, padding: "1px 7px", fontSize: 9 }}>{events.length} events</span>
+        {suspicious > 0 && (
+          <span style={{ background: "#ef444420", color: "#ef4444", borderRadius: 4, padding: "1px 7px", fontSize: 9, fontWeight: 700 }}>
+            ⚠ {suspicious} suspicious
+          </span>
+        )}
       </div>
-
-      {/* Expanded content */}
-      {expanded && (
-        <div style={{ padding: '12px 14px' }}>
-          {/* VPC zones */}
-          {region.vpcs?.length > 0 && (
-            <div style={{ marginBottom: 14 }}>
-              <div style={{ color: '#1e3a5f', fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.8px', marginBottom: 8 }}>VPC Zones</div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
-                {region.vpcs.map(vpc => <VpcZone key={vpc.id} vpc={vpc} onClick={onClick} />)}
-              </div>
+      <div style={{ flex: 1, display: "flex", gap: 8, padding: "8px 12px", overflowX: "auto", alignItems: "flex-start" }}>
+        {events.map((ev, i) => (
+          <div key={i} style={{
+            flexShrink: 0, width: 190,
+            background: ev.is_suspicious ? "#2d0a0a" : "#0c1828",
+            border: `1px solid ${ev.is_suspicious ? "#ef4444" : "#1e293b"}`,
+            borderRadius: 7, padding: "7px 9px",
+          }}>
+            <div style={{ color: ev.is_suspicious ? "#ef4444" : "#f1f5f9", fontSize: 10, fontWeight: 600, marginBottom: 3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              {ev.is_suspicious ? "⚠ " : ""}{ev.event_name}
             </div>
-          )}
-
-          {/* Other regional resources */}
-          {region.resources?.length > 0 && (
-            <div>
-              <div style={{ color: '#1e3a5f', fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.8px', marginBottom: 7 }}>Regional Services ({region.resources.length})</div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
-                {region.resources.map(r => <ResourceChip key={r.id} node={r} onClick={onClick} />)}
-              </div>
+            <div style={{ color: "#94a3b8", fontSize: 9 }}>👤 {ev.username || "Unknown"}</div>
+            <div style={{ color: "#475569", fontSize: 8, marginTop: 2 }}>
+              📍 {ev.region || "—"} {ev.source_ip ? `· ${ev.source_ip}` : ""}
             </div>
-          )}
-
-          {!region.vpcs?.length && !region.resources?.length && (
-            <div style={{ color: '#1e2e45', fontSize: 11, textAlign: 'center', padding: '8px 0' }}>No resources in this region</div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Evidence panel — grouped inventory (Config layer)
-// ─────────────────────────────────────────────────────────────────────────────
-function EvidencePanel({ evidence, onClick }) {
-  const [openGroup, setOpenGroup] = useState(null);
-  if (!evidence || Object.keys(evidence).length === 0) return <div style={{ color: '#1e2e45', fontSize: 12, padding: 20, textAlign: 'center' }}>No evidence data</div>;
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-      {Object.entries(evidence).map(([group, data]) => {
-        const isOpen = openGroup === group;
-        const vPct   = data.count > 0 ? Math.round((data.violations / data.count) * 100) : 0;
-        return (
-          <div key={group} style={{ border: '1px solid #131f33', borderRadius: 10, overflow: 'hidden' }}>
-            <div onClick={() => setOpenGroup(isOpen ? null : group)} style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '9px 14px', cursor: 'pointer', background: '#060e1c' }}>
-              <span style={{ color: '#f1f5f9', fontSize: 12, fontWeight: 600, flex: 1 }}>{group}</span>
-              <span style={{ color: '#374151', fontSize: 11 }}>{data.count}</span>
-              {data.violations > 0 && <span style={{ color: '#ef4444', fontSize: 11, fontWeight: 700 }}>⚠ {data.violations}</span>}
-              <div style={{ width: 40, height: 4, borderRadius: 2, background: '#0c1828', overflow: 'hidden' }}>
-                <div style={{ height: '100%', width: `${100 - vPct}%`, background: vPct === 0 ? '#10b981' : vPct < 30 ? '#f59e0b' : '#ef4444', transition: 'width 0.3s' }} />
-              </div>
-              <span style={{ color: '#1e3a5f', fontSize: 10 }}>{isOpen ? '▲' : '▼'}</span>
-            </div>
-            {isOpen && (
-              <div style={{ padding: '10px 14px', display: 'flex', flexWrap: 'wrap', gap: 6, borderTop: '1px solid #131f33' }}>
-                {data.resources.map(r => <ResourceChip key={r.id} node={r} onClick={onClick} />)}
+            {ev.event_time && (
+              <div style={{ color: "#334155", fontSize: 8, marginTop: 1 }}>
+                {new Date(ev.event_time).toLocaleString()}
               </div>
             )}
           </div>
-        );
-      })}
-    </div>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Attribution panel — CloudTrail events
-// ─────────────────────────────────────────────────────────────────────────────
-function AttributionPanel({ events }) {
-  if (!events?.length) return <div style={{ color: '#1e2e45', fontSize: 12, padding: 20, textAlign: 'center' }}>No CloudTrail events in cache.<br /><span style={{ fontSize: 10 }}>Run a scan to load recent activity.</span></div>;
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-      {events.map((ev, i) => (
-        <div key={i} style={{
-          padding: '8px 12px', borderRadius: 8,
-          background: ev.is_suspicious ? 'rgba(239,68,68,0.06)' : '#060e1c',
-          border: `1px solid ${ev.is_suspicious ? '#ef444430' : '#131f33'}`,
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 3 }}>
-            <span style={{ fontSize: 13 }}>{ev.is_suspicious ? '🚨' : '📝'}</span>
-            <span style={{ color: ev.is_suspicious ? '#ef4444' : '#94a3b8', fontSize: 12, fontWeight: 600, flex: 1 }}>{ev.event_name}</span>
-            <span style={{ color: '#1e3a5f', fontSize: 10 }}>{ev.region}</span>
-          </div>
-          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-            <span style={{ color: '#475569', fontSize: 10 }}>👤 {ev.username}</span>
-            <span style={{ color: '#475569', fontSize: 10 }}>📡 {ev.event_source?.replace('.amazonaws.com', '')}</span>
-            {ev.source_ip && <span style={{ color: '#475569', fontSize: 10 }}>🌐 {ev.source_ip}</span>}
-            {ev.error_code && <span style={{ color: '#ef4444', fontSize: 10 }}>✗ {ev.error_code}</span>}
-          </div>
-          {ev.event_time && <div style={{ color: '#1e3a5f', fontSize: 9, marginTop: 2 }}>{new Date(ev.event_time).toLocaleString()}</div>}
-        </div>
-      ))}
-    </div>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Org header — top banner
-// ─────────────────────────────────────────────────────────────────────────────
-function OrgHeader({ org }) {
-  if (!org || !org.scan_time) return null;
-  const pc = POSTURE_COLOR[org.posture] || '#94a3b8';
-  const pi = POSTURE_ICON[org.posture]  || '❓';
-
-  return (
-    <div style={{
-      display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 12,
-      padding: '12px 20px', borderRadius: 12, marginBottom: 18,
-      background: 'linear-gradient(135deg, #060f1f 0%, #0a1628 100%)',
-      border: `1px solid ${pc}30`,
-      boxShadow: `0 0 30px ${pc}10`,
-    }}>
-      {/* AWS Org block */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <div style={{ width: 42, height: 42, borderRadius: 10, background: `${pc}15`, border: `2px solid ${pc}40`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20 }}>🏢</div>
-        <div>
-          <div style={{ color: '#f1f5f9', fontSize: 13, fontWeight: 700 }}>AWS Account</div>
-          <div style={{ color: '#374151', fontSize: 11 }}>{org.account_id || 'Account'} · {org.primary_region}</div>
-        </div>
-      </div>
-
-      <div style={{ width: 1, height: 36, background: '#131f33' }} />
-
-      {/* Posture */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <span style={{ fontSize: 18 }}>{pi}</span>
-        <div>
-          <div style={{ color: pc, fontSize: 13, fontWeight: 800 }}>{org.posture}</div>
-          <div style={{ color: '#374151', fontSize: 10 }}>Compliance Posture</div>
-        </div>
-        {/* score ring */}
-        <div style={{ position: 'relative', width: 44, height: 44 }}>
-          <svg viewBox="0 0 44 44" style={{ transform: 'rotate(-90deg)' }}>
-            <circle cx="22" cy="22" r="18" fill="none" stroke="#0c1828" strokeWidth="4" />
-            <circle cx="22" cy="22" r="18" fill="none" stroke={pc} strokeWidth="4"
-              strokeDasharray={`${(org.score / 100) * 113} 113`} strokeLinecap="round" />
-          </svg>
-          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: pc, fontSize: 11, fontWeight: 800 }}>{org.score}%</div>
-        </div>
-      </div>
-
-      <div style={{ width: 1, height: 36, background: '#131f33' }} />
-
-      {/* Stats */}
-      {[
-        { label: 'Regions',    val: org.regions_active, icon: '🗺️', color: '#22d3ee' },
-        { label: 'Resources',  val: org.total_resources, icon: '☁️', color: '#60a5fa' },
-        { label: 'Compliant',  val: org.compliant, icon: '✅', color: '#10b981' },
-        { label: 'Violations', val: org.violations, icon: '⚠️', color: '#ef4444' },
-      ].map(({ label, val, icon, color }) => (
-        <div key={label} style={{ textAlign: 'center', minWidth: 52 }}>
-          <div style={{ color, fontSize: 18, fontWeight: 800, lineHeight: 1 }}>{val ?? 0}</div>
-          <div style={{ color: '#374151', fontSize: 10 }}>{label}</div>
-        </div>
-      ))}
-
-      <div style={{ width: 1, height: 36, background: '#131f33' }} />
-
-      {/* CloudTrail status */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-        <span style={{ fontSize: 15 }}>👣</span>
-        <div>
-          <div style={{ color: org.cloudtrail_enabled ? '#818cf8' : '#ef4444', fontSize: 12, fontWeight: 700 }}>CloudTrail {org.cloudtrail_enabled ? `✓ (${org.cloudtrail_count} trail${org.cloudtrail_count !== 1 ? 's' : ''})` : '✗ MISSING'}</div>
-          <div style={{ color: '#374151', fontSize: 10 }}>{org.config_rules_checked} checks evaluated</div>
-        </div>
-      </div>
-
-      <div style={{ flex: 1 }} />
-      <div style={{ color: '#1e3a5f', fontSize: 10, textAlign: 'right' }}>
-        Last scan<br />{org.scan_time ? new Date(org.scan_time).toLocaleString() : '—'}
+        ))}
       </div>
     </div>
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Left sidebar
-// ─────────────────────────────────────────────────────────────────────────────
-function Sidebar({ typeCounts, meta, activeTab, onTabChange }) {
-  const tabs = [
-    { id: 'regions',     label: 'Regions',     icon: '🗺️' },
-    { id: 'evidence',    label: 'Inventory',   icon: '📋' },
-    { id: 'attribution', label: 'Activity',    icon: '👣' },
-    { id: 'global',      label: 'Global',      icon: '🌍' },
+// ─── Compliance bar (top right summary) ─────────────────────────────────────
+function ComplianceBar({ meta, ol }) {
+  if (!meta?.total && !ol?.total_resources) return null;
+  const score = meta?.score ?? ol?.score ?? 0;
+  const scoreColor = score >= 80 ? "#22c55e" : score >= 60 ? "#f59e0b" : "#ef4444";
+  const pills = [
+    { label: "Score",   val: `${score}%`,                 color: scoreColor },
+    { label: "PASS",    val: meta?.compliant ?? 0,         color: "#22c55e" },
+    { label: "FAIL",    val: meta?.violations ?? 0,        color: "#ef4444" },
+    { label: "Regions", val: ol?.regions_active ?? 0,      color: "#34d399" },
+    { label: "Trail",   val: ol?.cloudtrail_enabled ? "ON" : "OFF", color: ol?.cloudtrail_enabled ? "#22c55e" : "#ef4444" },
   ];
-
-  // type count summary
-  const grouped = {};
-  Object.entries(typeCounts).forEach(([t, c]) => {
-    const g = getMeta(t).group || 'Other';
-    grouped[g] = (grouped[g] || 0) + c;
-  });
-
   return (
-    <div style={{ width: 210, flexShrink: 0, background: '#050d1a', borderRight: '1px solid #131f33', display: 'flex', flexDirection: 'column' }}>
-      {/* Stats */}
-      <div style={{ padding: '14px 14px 10px', borderBottom: '1px solid #131f33' }}>
-        <div style={{ color: '#2a3a56', fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '1px', marginBottom: 4 }}>Total Resources</div>
-        <div style={{ color: '#f1f5f9', fontSize: 26, fontWeight: 800, lineHeight: 1 }}>{meta.total || 0}</div>
-        <div style={{ display: 'flex', gap: 12, marginTop: 7 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            <div style={{ width: 5, height: 5, borderRadius: '50%', background: '#10b981', boxShadow: '0 0 4px #10b981' }} />
-            <span style={{ color: '#10b981', fontSize: 11, fontWeight: 600 }}>{meta.compliant}</span>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            <div style={{ width: 5, height: 5, borderRadius: '50%', background: '#ef4444', boxShadow: '0 0 4px #ef4444' }} />
-            <span style={{ color: '#ef4444', fontSize: 11, fontWeight: 600 }}>{meta.violations}</span>
-          </div>
+    <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+      {pills.map(({ label, val, color }) => (
+        <div key={label} style={{ background: "#090f1e", borderRadius: 5, padding: "3px 8px", display: "flex", alignItems: "center", gap: 4 }}>
+          <span style={{ color, fontSize: 11, fontWeight: 700 }}>{val}</span>
+          <span style={{ color: "#334155", fontSize: 9 }}>{label}</span>
         </div>
-      </div>
-
-      {/* Tabs */}
-      <div style={{ display: 'flex', flexDirection: 'column', padding: '6px 8px', gap: 3, borderBottom: '1px solid #131f33' }}>
-        {tabs.map(t => (
-          <button key={t.id} onClick={() => onTabChange(t.id)} style={{
-            display: 'flex', alignItems: 'center', gap: 8, padding: '7px 10px', borderRadius: 8, border: 'none', cursor: 'pointer', textAlign: 'left',
-            background: activeTab === t.id ? 'rgba(59,130,246,0.12)' : 'transparent',
-            color: activeTab === t.id ? '#60a5fa' : '#4b5563',
-          }}>
-            <span style={{ fontSize: 14 }}>{t.icon}</span>
-            <span style={{ fontSize: 12, fontWeight: activeTab === t.id ? 700 : 400 }}>{t.label}</span>
-          </button>
-        ))}
-      </div>
-
-      {/* Resource type counts */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '6px 0' }}>
-        {Object.entries(grouped).sort(([,a],[,b]) => b - a).map(([g, c]) => (
-          <div key={g} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 14px' }}>
-            <span style={{ color: '#4b5563', fontSize: 11, flex: 1 }}>{g}</span>
-            <span style={{ color: '#374151', fontSize: 12, fontWeight: 700 }}>{c}</span>
-          </div>
-        ))}
-      </div>
+      ))}
     </div>
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Main component
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── Main Component ──────────────────────────────────────────────────────────
 export default function TopologyView() {
-  const [data, setData]         = useState(null);
-  const [loading, setLoading]   = useState(true);
-  const [selected, setSelected] = useState(null);
-  const [activeTab, setActiveTab] = useState('regions');
-  const [lastSync, setLastSync] = useState(null);
-  const [expandedRegions, setExpandedRegions] = useState({});
-  const [search, setSearch]     = useState('');
+  const [topoData,        setTopoData]        = useState(null);
+  const [loading,         setLoading]         = useState(true);
+  const [error,           setError]           = useState(null);
+  const [currentView,     setCurrentView]     = useState("overview");
+  const [selectedNode,    setSelectedNode]    = useState(null);
+  const [showTrail,       setShowTrail]       = useState(true);
+  const [showExplorer,    setShowExplorer]    = useState(true);
+  const [filterCompliance,setFilterCompliance]= useState("all");
+  const [nodes, setNodes, onNodesChange]      = useNodesState([]);
+  const [edges, setEdges, onEdgesChange]      = useEdgesState([]);
 
+  // ── Fetch ──
   const fetchData = useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
-      const r = await fetch(`${API}/api/topology`);
-      const j = await r.json();
-      setData(j);
-      setLastSync(new Date());
-      // Auto-expand regions with violations first
-      const init = {};
-      (j.regions || []).forEach((reg, i) => {
-        init[reg.name] = i < 2 || reg.violations > 0;
-      });
-      setExpandedRegions(init);
-    } catch {}
-    finally { setLoading(false); }
+      const res  = await fetch(`${API}/api/topology`);
+      const data = await res.json();
+      if (data.error && !data.org_layer?.account_id) {
+        setError(data.error);
+      } else {
+        setTopoData(data);
+      }
+    } catch (e) {
+      setError(e.message || "Network error");
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
+  useEffect(() => { fetchData(); }, [fetchData]);
+
+  // ── Rebuild graph when view / filter changes ──
   useEffect(() => {
-    fetchData();
-    let ws;
-    try {
-      ws = new WebSocket(`${API.replace('http', 'ws')}/api/ws/topology`);
-      ws.onmessage = ev => { try { if (JSON.parse(ev.data).type === 'RESOURCE_UPDATED') fetchData(); } catch {} };
-    } catch {}
-    return () => ws?.close();
-  }, [fetchData]);
+    if (!topoData) return;
 
-  const handleClick = useCallback((node) => setSelected(p => p?.id === node.id ? null : node), []);
-  const toggleRegion = useCallback((name) => setExpandedRegions(p => ({ ...p, [name]: !p[name] })), []);
+    let result;
+    if      (currentView === "overview")          result = buildOverviewGraph(topoData, currentView);
+    else if (currentView === "iam")               result = buildIAMGraph(topoData.evidence);
+    else if (currentView === "global")            result = buildGlobalGraph(topoData.global_resources || []);
+    else if (currentView.startsWith("region:")) {
+      const name = currentView.slice(7);
+      result = buildRegionGraph((topoData.regions || []).find(r => r.name === name));
+    }
+    if (!result) return;
 
-  const meta        = data?.meta        || {};
-  const typeCounts  = data?.type_counts || {};
-  const orgLayer    = data?.org_layer   || {};
-  const regions     = data?.regions     || [];
-  const attribution = data?.attribution || [];
-  const evidence    = data?.evidence    || {};
-  const globalRes   = data?.global_resources || [];
+    // Apply compliance filter
+    if (filterCompliance !== "all") {
+      const keep = new Set(
+        result.nodes
+          .filter(n => {
+            const s = (n.data?.compliance?.status || "").toLowerCase();
+            if (filterCompliance === "fail") return s === "fail";
+            if (filterCompliance === "pass") return s === "pass";
+            if (filterCompliance === "warn") return s === "warn" || s === "unknown";
+            return true;
+          })
+          .map(n => n.id)
+      );
+      // also keep parents that have at least one matching child
+      result.edges.forEach(e => {
+        if (keep.has(e.target)) keep.add(e.source);
+      });
+      result.nodes = result.nodes.filter(n => keep.has(n.id));
+      result.edges = result.edges.filter(e => keep.has(e.source) && keep.has(e.target));
+    }
 
-  // Filter regions/resources by search
-  const filterNode = (n) => {
-    if (!search) return true;
-    const q = search.toLowerCase();
-    return (n.label||'').toLowerCase().includes(q) || (n.type||'').toLowerCase().includes(q) || (n.id||'').toLowerCase().includes(q);
-  };
+    setNodes(result.nodes);
+    setEdges(result.edges);
+  }, [topoData, currentView, filterCompliance, setNodes, setEdges]);
 
-  const filteredRegions = search ? regions.map(reg => ({
-    ...reg,
-    vpcs: (reg.vpcs || []).map(vpc => ({
-      ...vpc,
-      subnets: (vpc.subnets || []).map(s => ({ ...s, resources: (s.resources || []).filter(filterNode) })),
-      unplaced: (vpc.unplaced || []).filter(filterNode),
-      sgs: (vpc.sgs || []).filter(filterNode),
-    })),
-    resources: (reg.resources || []).filter(filterNode),
-  })) : regions;
+  // ── Node click: navigate groups, inspect resources ──
+  const handleNodeClick = useCallback((_, node) => {
+    const id = node.id;
+    if (id === "g-iam")    { setCurrentView("iam");    setSelectedNode(null); return; }
+    if (id === "g-global") { setCurrentView("global"); setSelectedNode(null); return; }
+    if (id.startsWith("g-reg-")) {
+      const name = id.replace("g-reg-", "");
+      setCurrentView(`region:${name}`);
+      setSelectedNode(null);
+      return;
+    }
+    setSelectedNode(node);
+  }, []);
 
-  const isEmpty = !loading && !data?.org_layer?.scan_time && (regions.length === 0);
+  const navigate = useCallback((view) => {
+    setCurrentView(view);
+    setSelectedNode(null);
+  }, []);
+
+  // ── Nav pills ──
+  const navPills = useMemo(() => {
+    const pills = [{ id: "overview", icon: "🔑", label: "Overview" }];
+    if (topoData?.evidence?.["Identity & Access"]?.count) pills.push({ id: "iam", icon: "👥", label: "IAM" });
+    (topoData?.regions || []).forEach(r => pills.push({ id: `region:${r.name}`, icon: r.cloudtrail ? "🌍" : "🌐", label: r.name }));
+    if (topoData?.global_resources?.length) pills.push({ id: "global", icon: "🌐", label: "Global" });
+    return pills;
+  }, [topoData]);
 
   return (
-    <div style={{ width: '100%', height: 'calc(100vh - 60px)', display: 'flex', flexDirection: 'column', background: '#030a14', fontFamily: 'inherit' }}>
+    <div style={{ width: "100%", height: "100%", display: "flex", flexDirection: "column", background: "#030a14", overflow: "hidden" }}>
 
-      {/* Top bar */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 18px', borderBottom: '1px solid #131f33', flexShrink: 0, background: '#050d1a' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <div style={{ width: 7, height: 7, borderRadius: '50%', background: '#10b981', boxShadow: '0 0 7px #10b981', animation: 'pulse 2s infinite' }} />
-          <span style={{ color: '#f1f5f9', fontSize: 14, fontWeight: 700 }}>Audit Topology</span>
-          {lastSync && <span style={{ color: '#1e2e45', fontSize: 11 }}>· {lastSync.toLocaleTimeString()}</span>}
+      {/* ── Header ── */}
+      <div style={{ padding: "9px 14px", background: "#050d1a", borderBottom: "1px solid #131f33", display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+        <div>
+          <div style={{ color: "#f1f5f9", fontWeight: 700, fontSize: 14 }}>AWS Infrastructure Topology</div>
+          <div style={{ color: "#334155", fontSize: 10, marginTop: 1 }}>Security · Compliance · Audit Graph</div>
         </div>
-
-        {meta.total > 0 && (
-          <div style={{ display: 'flex', gap: 6, marginLeft: 6 }}>
-            {[
-              { l: 'Resources', v: meta.total,      c: '#3b82f6' },
-              { l: 'Compliant', v: meta.compliant,  c: '#10b981' },
-              { l: 'Violations',v: meta.violations, c: '#ef4444' },
-              { l: 'Score',     v: meta.score != null ? `${meta.score}%` : '—', c: POSTURE_COLOR[meta.posture] || '#94a3b8' },
-            ].map(({ l, v, c }) => (
-              <div key={l} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '3px 9px', borderRadius: 14, background: `${c}0a`, border: `1px solid ${c}20` }}>
-                <div style={{ width: 4, height: 4, borderRadius: '50%', background: c }} />
-                <span style={{ color: '#4b5563', fontSize: 10 }}>{l}</span>
-                <span style={{ color: c, fontSize: 11, fontWeight: 700 }}>{v}</span>
-              </div>
-            ))}
-          </div>
-        )}
-
         <div style={{ flex: 1 }} />
-
-        <div style={{ position: 'relative' }}>
-          <span style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', color: '#1e2e45', fontSize: 11 }}>🔍</span>
-          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search resources…"
-            style={{ background: '#090f1e', border: '1px solid #131f33', borderRadius: 7, color: '#cbd5e1', fontSize: 11, padding: '5px 8px 5px 24px', width: 180, outline: 'none' }} />
+        {topoData && <ComplianceBar meta={topoData.meta} ol={topoData.org_layer} />}
+        <div style={{ display: "flex", gap: 6 }}>
+          <select
+            value={filterCompliance}
+            onChange={e => setFilterCompliance(e.target.value)}
+            style={{ background: "#090f1e", border: "1px solid #1e293b", color: "#94a3b8", borderRadius: 5, padding: "4px 8px", fontSize: 11, cursor: "pointer" }}
+          >
+            <option value="all">All Resources</option>
+            <option value="fail">Failures Only</option>
+            <option value="pass">Passing Only</option>
+            <option value="warn">Warnings</option>
+          </select>
+          <button onClick={() => setShowTrail(v => !v)}    style={{ padding: "4px 10px", borderRadius: 5, border: "1px solid #131f33", background: showTrail    ? "#0f1f3a" : "#090f1e", color: "#94a3b8", cursor: "pointer", fontSize: 11 }}>📝 Trail</button>
+          <button onClick={() => setShowExplorer(v => !v)} style={{ padding: "4px 10px", borderRadius: 5, border: "1px solid #131f33", background: showExplorer ? "#0f1f3a" : "#090f1e", color: "#94a3b8", cursor: "pointer", fontSize: 11 }}>📂 Explorer</button>
+          <button onClick={fetchData} disabled={loading}   style={{ padding: "4px 12px", borderRadius: 5, border: "1px solid #131f33", background: "#090f1e", color: "#cbd5e1", cursor: loading ? "not-allowed" : "pointer", fontSize: 11, opacity: loading ? 0.5 : 1 }}>
+            {loading ? "Loading…" : "↻ Refresh"}
+          </button>
         </div>
-
-        <button onClick={fetchData} disabled={loading} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '5px 11px', background: '#090f1e', border: '1px solid #131f33', borderRadius: 7, color: '#475569', fontSize: 11, cursor: 'pointer' }}>
-          <span style={{ display: 'inline-block', animation: loading ? 'spin 1s linear infinite' : 'none' }}>↻</span> Refresh
-        </button>
       </div>
 
-      {/* Body */}
-      <div style={{ flex: 1, display: 'flex', overflow: 'hidden', position: 'relative' }}>
+      {/* ── Error banner ── */}
+      {error && (
+        <div style={{ padding: "9px 14px", background: "#2d0a0a", color: "#f87171", borderBottom: "1px solid #ef444430", fontSize: 12, flexShrink: 0 }}>
+          ❌ {error}
+        </div>
+      )}
 
-        {/* Sidebar */}
-        {!loading && data && (
-          <Sidebar typeCounts={typeCounts} meta={meta} activeTab={activeTab} onTabChange={setActiveTab} />
+      {/* ── Body ── */}
+      <div style={{ flex: 1, display: "flex", overflow: "hidden", position: "relative" }}>
+
+        {/* Left Explorer */}
+        {showExplorer && topoData && (
+          <TreeExplorer data={topoData} currentView={currentView} onNavigate={navigate} />
         )}
 
         {/* Canvas */}
-        <div style={{ flex: 1, overflowY: 'auto', padding: '18px 22px', position: 'relative' }}>
+        <div style={{ flex: 1, position: "relative", overflow: "hidden" }}>
 
-          {loading && (
-            <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16, background: '#030a14', zIndex: 10 }}>
-              <div style={{ width: 44, height: 44, border: '2.5px solid #131f33', borderTopColor: '#3b82f6', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
-              <div style={{ color: '#374151', fontSize: 13 }}>Building audit topology…</div>
+          {/* Loading spinner */}
+          {loading && !topoData && (
+            <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 14, zIndex: 10 }}>
+              <div style={{ width: 44, height: 44, border: "3px solid #131f33", borderTopColor: "#3b82f6", borderRadius: "50%", animation: "spin 1s linear infinite" }} />
+              <div style={{ color: "#475569", fontSize: 12 }}>Building topology graph…</div>
             </div>
           )}
 
-          {isEmpty && !loading && (
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: 12 }}>
-              <div style={{ fontSize: 48 }}>🗺️</div>
-              <div style={{ color: '#f1f5f9', fontSize: 17, fontWeight: 700 }}>No topology data</div>
-              <div style={{ color: '#374151', fontSize: 13 }}>Run a scan from the Monitoring tab first.</div>
-              <button onClick={fetchData} style={{ marginTop: 8, padding: '9px 20px', background: '#3b82f6', border: 'none', borderRadius: 8, color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>Retry</button>
+          {/* Empty state */}
+          {!loading && !topoData && !error && (
+            <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 12 }}>
+              <div style={{ fontSize: 52 }}>🗺️</div>
+              <div style={{ color: "#f1f5f9", fontSize: 15, fontWeight: 700 }}>No topology data</div>
+              <div style={{ color: "#475569", fontSize: 12 }}>Run a scan from the Monitoring tab first</div>
             </div>
           )}
 
-          {!loading && data && !isEmpty && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 0, maxWidth: 1400 }}>
+          {/* ReactFlow canvas */}
+          {topoData && (
+            <ReactFlow
+              nodes={nodes} edges={edges}
+              onNodesChange={onNodesChange}
+              onEdgesChange={onEdgesChange}
+              onNodeClick={handleNodeClick}
+              nodeTypes={nodeTypes}
+              fitView fitViewOptions={{ padding: 0.15 }}
+              minZoom={0.08} maxZoom={2.5}
+              style={{ background: "#030a14" }}
+            >
+              <Background color="#0c1220" gap={22} variant="dots" />
+              <Controls style={{ background: "#07101f", border: "1px solid #1e293b", borderRadius: 8 }} />
+              <MiniMap
+                style={{ background: "#07101f", border: "1px solid #1e293b" }}
+                nodeColor={n => cs(n.data?.compliance).border}
+                maskColor="rgba(3,10,20,0.85)"
+                pannable zoomable
+              />
 
-              {/* ── Org Header (always) ── */}
-              <OrgHeader org={orgLayer} />
+              {/* Nav pills overlay */}
+              <div style={{ position: "absolute", top: 12, left: 12, zIndex: 10, display: "flex", gap: 5, flexWrap: "wrap", maxWidth: "60%" }}>
+                {navPills.map(({ id, icon, label }) => (
+                  <button
+                    key={id}
+                    onClick={() => navigate(id)}
+                    style={{
+                      padding: "4px 11px", borderRadius: 20,
+                      border: `1px solid ${id === currentView ? "#3b82f6" : "#1e293b"}`,
+                      background: id === currentView ? "#1e3a5f" : "#07101f",
+                      color: id === currentView ? "#60a5fa" : "#475569",
+                      fontSize: 11, cursor: "pointer", fontWeight: id === currentView ? 700 : 400,
+                      transition: "all 0.15s",
+                    }}
+                  >
+                    {icon} {label}
+                  </button>
+                ))}
+              </div>
 
-              {/* ── REGIONS TAB ── */}
-              {activeTab === 'regions' && (
-                <div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
-                    <div style={{ width: 3, height: 16, borderRadius: 2, background: '#22d3ee' }} />
-                    <span style={{ color: '#22d3ee', fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.8px' }}>Resource Topology</span>
-                    <span style={{ color: '#1e3a5f', fontSize: 11 }}>— Account → Region → VPC → Resource</span>
-                    <div style={{ flex: 1 }} />
-                    <button onClick={() => setExpandedRegions(Object.fromEntries(filteredRegions.map(r => [r.name, true])))} style={{ padding: '3px 9px', background: '#090f1e', border: '1px solid #131f33', borderRadius: 6, color: '#4b5563', fontSize: 10, cursor: 'pointer' }}>Expand All</button>
-                    <button onClick={() => setExpandedRegions({})} style={{ padding: '3px 9px', background: '#090f1e', border: '1px solid #131f33', borderRadius: 6, color: '#4b5563', fontSize: 10, cursor: 'pointer' }}>Collapse All</button>
+              {/* Legend */}
+              <div style={{ position: "absolute", bottom: 12, left: 12, zIndex: 10, display: "flex", gap: 8, background: "#07101f", border: "1px solid #1e293b", borderRadius: 7, padding: "6px 10px" }}>
+                {[["#22c55e","PASS"],["#f59e0b","WARN"],["#ef4444","FAIL"],["#334155","N/A"]].map(([c, l]) => (
+                  <div key={l} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                    <div style={{ width: 8, height: 8, borderRadius: 2, background: c }} />
+                    <span style={{ color: "#475569", fontSize: 9 }}>{l}</span>
                   </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                    {filteredRegions.length === 0
-                      ? <div style={{ color: '#1e2e45', fontSize: 12, textAlign: 'center', padding: 20 }}>No regions found</div>
-                      : filteredRegions.map(reg => (
-                          <RegionCard key={reg.name} region={reg} onClick={handleClick}
-                            expanded={!!expandedRegions[reg.name]} onToggle={() => toggleRegion(reg.name)} />
-                        ))
-                    }
-                  </div>
-                </div>
-              )}
-
-              {/* ── EVIDENCE TAB ── */}
-              {activeTab === 'evidence' && (
-                <div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
-                    <div style={{ width: 3, height: 16, borderRadius: 2, background: '#60a5fa' }} />
-                    <span style={{ color: '#60a5fa', fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.8px' }}>Resource Inventory</span>
-                    <span style={{ color: '#1e3a5f', fontSize: 11 }}>— Service-grouped evidence for auditors</span>
-                  </div>
-                  <EvidencePanel evidence={evidence} onClick={handleClick} />
-                </div>
-              )}
-
-              {/* ── ATTRIBUTION TAB ── */}
-              {activeTab === 'attribution' && (
-                <div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
-                    <div style={{ width: 3, height: 16, borderRadius: 2, background: '#818cf8' }} />
-                    <span style={{ color: '#818cf8', fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.8px' }}>CloudTrail Activity</span>
-                    <span style={{ color: '#1e3a5f', fontSize: 11 }}>— Who did what and when</span>
-                  </div>
-                  <AttributionPanel events={attribution} />
-                </div>
-              )}
-
-              {/* ── GLOBAL TAB ── */}
-              {activeTab === 'global' && (
-                <div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
-                    <div style={{ width: 3, height: 16, borderRadius: 2, background: '#7dd3fc' }} />
-                    <span style={{ color: '#7dd3fc', fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.8px' }}>Global Resources</span>
-                    <span style={{ color: '#1e3a5f', fontSize: 11 }}>— IAM, S3, CloudFront (not region-bound)</span>
-                  </div>
-                  {globalRes.length > 0
-                    ? <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7 }}>
-                        {globalRes.filter(filterNode).map(r => <ResourceChip key={r.id} node={r} onClick={handleClick} />)}
-                      </div>
-                    : <div style={{ color: '#1e2e45', fontSize: 12, textAlign: 'center', padding: 20 }}>No global resources found</div>
-                  }
-                </div>
-              )}
-
-            </div>
+                ))}
+              </div>
+            </ReactFlow>
           )}
         </div>
 
-        {/* Inspector */}
+        {/* Right Inspector */}
         <AnimatePresence>
-          {selected && <Inspector node={selected} onClose={() => setSelected(null)} />}
+          {selectedNode && (
+            <InspectorPanel
+              node={selectedNode}
+              attribution={topoData?.attribution}
+              onClose={() => setSelectedNode(null)}
+            />
+          )}
         </AnimatePresence>
       </div>
 
-      <style>{`
-        @keyframes spin  { to { transform: rotate(360deg); } }
-        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
-      `}</style>
+      {/* CloudTrail Timeline */}
+      {topoData && showTrail && (
+        <CloudTrailTimeline events={topoData.attribution || []} />
+      )}
+
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   );
 }

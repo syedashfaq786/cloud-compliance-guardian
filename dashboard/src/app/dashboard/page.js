@@ -16,7 +16,7 @@ import MonitoringView from "@/components/MonitoringView";
 import TopologyView from "@/components/TopologyView";
 import { Icon } from "@/components/Icons";
 
-const API_BASE = "http://localhost:8001";
+const API_BASE = "http://127.0.0.1:8000";
 
 function DashboardOverview() {
   const [summary, setSummary] = useState(null);

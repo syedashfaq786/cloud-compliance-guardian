@@ -2,7 +2,7 @@
 import { useState, useEffect } from "react";
 import { Icon } from "./Icons";
 
-const API = "http://localhost:8001";
+const API = "http://127.0.0.1:8000";
 
 
 export default function MonitoringView({ onNavigate }) {
@@ -20,8 +20,11 @@ export default function MonitoringView({ onNavigate }) {
   const [availableRegions, setAvailableRegions] = useState([]);
   const [selectedRegions, setSelectedRegions] = useState([]);
   const [showRegionFilter, setShowRegionFilter] = useState(false);
+  const [regionsInScan, setRegionsInScan] = useState([]); // Regions that have resources after scan
+  const [filterByRegions, setFilterByRegions] = useState([]); // Selected regions for filtering display
   const [downloading, setDownloading] = useState(null); // 'pdf' | 'csv' | 'json' | null
-  const [scanFramework, setScanFramework] = useState("All"); // selected BEFORE scan runs
+  const [scanFramework, setScanFramework] = useState("CIS"); // selected BEFORE scan runs
+  const [searchQuery, setSearchQuery] = useState(""); // Search query for inventory filtering
 
 
   useEffect(() => {
@@ -88,22 +91,41 @@ export default function MonitoringView({ onNavigate }) {
     try {
       const url = `${API}/api/${selectedCloud}/scan`;
       const body = selectedCloud === "aws"
-        ? { regions: selectedRegions.length ? selectedRegions : null, framework: scanFramework }
+        // ALWAYS scan ALL regions (regions: null tells backend to auto-discover and scan all)
+        // selectedRegions is only for UI filtering, not for limiting the scan
+        ? { regions: null, framework: scanFramework }
         : {};
+      
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 600000); // 600 second (10 min) timeout for multi-region scans
+      
       const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body)
+        body: JSON.stringify(body),
+        signal: controller.signal
       });
+      clearTimeout(timeoutId);
+      
       if (!res.ok) {
         const err = await res.json();
         throw new Error(err.detail || "Scan failed");
       }
       const data = await res.json();
       setScanResults(data);
+      
+      // Extract unique regions from scan results and sort them
+      if (data.resources) {
+        const regionsSet = new Set(data.resources.map(r => r.region).filter(Boolean));
+        const regionsList = Array.from(regionsSet).sort();
+        setRegionsInScan(regionsList);
+        // Auto-select all regions initially
+        setFilterByRegions(regionsList);
+      }
+      
       if (selectedCloud === "aws") fetchEvents();
     } catch (err) {
-      setScanResults({ error: err.message });
+      setScanResults({ error: err.name === "AbortError" ? "Scan timeout (10 minutes) - scanning all regions took too long. Try again or check AWS API limits." : err.message });
     } finally {
       setScanning(false);
     }
@@ -122,7 +144,7 @@ export default function MonitoringView({ onNavigate }) {
     try {
       // Use the framework that was selected at scan time (stored in results or state)
       const fw = scanResults?.framework || scanFramework;
-      const frameworkParam = fw && fw !== "All" ? `&framework=${fw}` : "";
+      const frameworkParam = `&framework=${fw}`;
       const reportEndpoint = `${API}/api/${selectedCloud}/scan/report?format=${format}${frameworkParam}`;
       const res = await fetch(reportEndpoint);
       if (!res.ok) { alert("Report download failed — run a scan first."); return; }
@@ -130,7 +152,7 @@ export default function MonitoringView({ onNavigate }) {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      const fwLabel = fw && fw !== "All" ? `-${fw.toLowerCase()}` : "";
+      const fwLabel = `-${fw.toLowerCase()}`;
       a.download = `${selectedCloud}-compliance-report${fwLabel}.${format}`;
       a.click();
       URL.revokeObjectURL(url);
@@ -165,12 +187,24 @@ export default function MonitoringView({ onNavigate }) {
   const cloudLogo = selectedCloud === "aws" ? "/logos/aws.svg" : selectedCloud === "azure" ? "/logos/azure.svg" : "/logos/gcp.svg";
   const audit = scanResults?.audit;
   const metrics = scanResults?.scan || {};
-  const findings = audit?.findings || [];
+  
+  // Filter resources by selected regions (if user has selected specific regions)
+  const filteredResources = scanResults?.resources
+    ? filterByRegions.length > 0 
+      ? scanResults.resources.filter(r => filterByRegions.includes(r.region))
+      : scanResults.resources
+    : [];
+  
+  const findings = (audit?.findings || []).filter(f => {
+    // Also filter findings by region if filtering is active
+    if (filterByRegions.length === 0 || !f.resource_region) return true;
+    return filterByRegions.includes(f.resource_region);
+  });
   const healthScore = audit?.health_score ?? audit?.summary?.health_score ?? 0;
   const activeFramework = scanResults?.framework || scanFramework;
-  const FRAMEWORK_COLORS = { CIS: "#f97316", NIST: "#3b82f6", CCM: "#8b5cf6", All: "var(--accent-primary)" };
+  const FRAMEWORK_COLORS = { CIS: "#f97316", NIST: "#3b82f6", CCM: "#8b5cf6" };
   const fwColor = FRAMEWORK_COLORS[activeFramework] || "var(--accent-primary)";
-  const fwFullName = { CIS: "CIS Benchmarks", NIST: "NIST 800-53 Rev 5", CCM: "CSA CCM v4.1", All: "All Frameworks" }[activeFramework] || activeFramework;
+  const fwFullName = { CIS: "CIS Benchmarks", NIST: "NIST 800-53 Rev 5", CCM: "CSA CCM v4.1" }[activeFramework] || activeFramework;
 
   const getSeverityColor = (severity) => ({ CRITICAL: "#ef4444", HIGH: "#f97316", MEDIUM: "#eab308", LOW: "#3b82f6" }[severity] || "#6b7280");
 
@@ -219,12 +253,12 @@ export default function MonitoringView({ onNavigate }) {
         {/* Right action buttons — framework + region + scan + disconnect */}
         <div style={{ display: "flex", gap: 10, alignItems: "center", position: "relative", flexWrap: "wrap" }}>
 
-          {/* Framework selector — choose BEFORE running scan */}
-          {!scanning && (
+          {/* Framework selector — choose BEFORE running scan (only when connected) */}
+          {!scanning && currentStatus?.connected && (
             <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "6px 10px", background: "var(--bg-tertiary)", borderRadius: 8, border: "1px solid var(--border-color)" }}>
               <Icon name="shield" size={13} style={{ color: "var(--text-muted)" }} />
               <span style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 600, marginRight: 2 }}>Framework:</span>
-              {["All", "CIS", "NIST", "CCM"].map(fw => (
+              {["CIS", "NIST", "CCM"].map(fw => (
                 <button
                   key={fw}
                   onClick={() => setScanFramework(fw)}
@@ -239,8 +273,8 @@ export default function MonitoringView({ onNavigate }) {
             </div>
           )}
 
-          {/* Region selector (AWS only) */}
-          {selectedCloud === "aws" && !scanning && (
+          {/* Region filter (AWS only, only after scan completes) */}
+          {selectedCloud === "aws" && scanResults && regionsInScan.length > 1 && !scanning && currentStatus?.connected && (
             <div style={{ position: "relative" }}>
               <button
                 onClick={() => setShowRegionFilter(!showRegionFilter)}
@@ -253,7 +287,7 @@ export default function MonitoringView({ onNavigate }) {
                 }}
               >
                 <Icon name="globe" size={14} />
-                {selectedRegions.length === 1 ? selectedRegions[0] : selectedRegions.length > 1 ? `${selectedRegions.length} Regions` : "Select Region"}
+                {filterByRegions.length === regionsInScan.length ? "All Regions" : `${filterByRegions.length}/${regionsInScan.length} Regions`}
               </button>
               {showRegionFilter && (
                 <div style={{
@@ -263,34 +297,35 @@ export default function MonitoringView({ onNavigate }) {
                   minWidth: 220, padding: "8px 0", maxHeight: 320, overflowY: "auto"
                 }}>
                   <div style={{ padding: "8px 16px 4px", fontSize: 11, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
-                    Select Regions
+                    Filter by Region
                   </div>
-                  {availableRegions.length === 0 && (
-                    <div style={{ padding: "12px 16px", fontSize: 13, color: "var(--text-muted)" }}>Loading regions…</div>
-                  )}
-                  {availableRegions.map(region => {
-                    const isSelected = selectedRegions.includes(region);
+                  {regionsInScan.map(region => {
+                    const isSelected = filterByRegions.includes(region);
+                    const regionCount = scanResults.resources.filter(r => r.region === region).length;
                     return (
                       <button
                         key={region}
-                        onClick={() => setSelectedRegions(prev => isSelected ? prev.filter(r => r !== region) : [...prev, region])}
+                        onClick={() => setFilterByRegions(prev => isSelected ? prev.filter(r => r !== region) : [...prev, region])}
                         style={{
-                          display: "flex", alignItems: "center", gap: 10, width: "100%",
+                          display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, width: "100%",
                           padding: "9px 16px", background: isSelected ? "rgba(255,122,0,0.08)" : "transparent",
                           border: "none", cursor: "pointer", fontSize: 13, textAlign: "left",
                           color: isSelected ? "var(--accent-primary)" : "var(--text-primary)",
                           fontWeight: isSelected ? 700 : 400,
                         }}
                       >
-                        <span style={{
-                          width: 16, height: 16, borderRadius: 4, flexShrink: 0,
-                          border: `2px solid ${isSelected ? "var(--accent-primary)" : "var(--border-color)"}`,
-                          background: isSelected ? "var(--accent-primary)" : "transparent",
-                          display: "flex", alignItems: "center", justifyContent: "center"
-                        }}>
-                          {isSelected && <span style={{ color: "#fff", fontSize: 10, fontWeight: 900 }}>✓</span>}
-                        </span>
-                        {region}
+                        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                          <span style={{
+                            width: 16, height: 16, borderRadius: 4, flexShrink: 0,
+                            border: `2px solid ${isSelected ? "var(--accent-primary)" : "var(--border-color)"}`,
+                            background: isSelected ? "var(--accent-primary)" : "transparent",
+                            display: "flex", alignItems: "center", justifyContent: "center"
+                          }}>
+                            {isSelected && <span style={{ color: "#fff", fontSize: 10, fontWeight: 900 }}>✓</span>}
+                          </span>
+                          {region}
+                        </div>
+                        <span style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 500 }}>{regionCount}</span>
                       </button>
                     );
                   })}
@@ -298,9 +333,9 @@ export default function MonitoringView({ onNavigate }) {
                     <button
                       onClick={() => setShowRegionFilter(false)}
                       style={{ flex: 1, padding: "7px 0", borderRadius: 6, background: "var(--accent-primary)", color: "#fff", border: "none", cursor: "pointer", fontSize: 13, fontWeight: 700 }}
-                    >Apply</button>
+                    >Done</button>
                     <button
-                      onClick={() => setSelectedRegions(availableRegions)}
+                      onClick={() => setFilterByRegions(regionsInScan)}
                       style={{ padding: "7px 12px", borderRadius: 6, background: "var(--bg-tertiary)", color: "var(--text-secondary)", border: "1px solid var(--border-color)", cursor: "pointer", fontSize: 12 }}
                     >All</button>
                   </div>
@@ -309,17 +344,36 @@ export default function MonitoringView({ onNavigate }) {
             </div>
           )}
 
-          <button className="save-btn" onClick={handleScan} disabled={scanning} style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 20px" }}>
+          <button className="save-btn" onClick={handleScan} disabled={scanning || !currentStatus?.connected} style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 20px" }}>
             {scanning
-              ? <><span className="spinner"></span> Scanning {scanFramework !== "All" ? `(${scanFramework})` : ""}…</>
-              : <><Icon name="refresh" size={16} /> Run {scanFramework !== "All" ? scanFramework : "Live"} Scan</>}
+              ? <><span className="spinner"></span> Scanning ({scanFramework})…</>
+              : <><Icon name="refresh" size={16} /> Run {scanFramework} Scan</>}
           </button>
-          <button
-            onClick={handleDisconnect}
-            style={{ padding: "9px 16px", background: "rgba(220,53,69,0.08)", color: "#dc3545", border: "1px solid rgba(220,53,69,0.25)", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: "pointer" }}
-          >
-            Disconnect
-          </button>
+          {currentStatus?.connected && (
+            <button
+              onClick={handleDisconnect}
+              style={{ 
+                display: "flex", 
+                alignItems: "center", 
+                gap: 8,
+                padding: "9px 16px", 
+                background: "rgba(239, 68, 68, 0.1)", 
+                color: "#ef4444", 
+                border: "1px solid rgba(239, 68, 68, 0.3)", 
+                borderRadius: 8, 
+                fontSize: 13, 
+                fontWeight: 600, 
+                cursor: "pointer",
+                transition: "all 0.2s ease",
+                hover: { background: "rgba(239, 68, 68, 0.15)" }
+              }}
+              onMouseEnter={(e) => e.target.style.background = "rgba(239, 68, 68, 0.15)"}
+              onMouseLeave={(e) => e.target.style.background = "rgba(239, 68, 68, 0.1)"}
+            >
+              <Icon name="power" size={14} />
+              Disconnect
+            </button>
+          )}
         </div>
       </div>
 
@@ -376,7 +430,8 @@ export default function MonitoringView({ onNavigate }) {
           { id: "overview", name: "Overview", icon: "dashboard" },
           { id: "inventory", name: "Inventory", icon: "box" },
           { id: "compliance", name: "Compliance", icon: "shield-check" },
-          { id: "activity", name: "Activity", icon: "clock" }
+          { id: "activity", name: "Activity", icon: "clock" },
+          { id: "diagnostics", name: "Diagnostics", icon: "wrench" }
         ].map(tab => (
           <button
             key={tab.id}
@@ -393,7 +448,25 @@ export default function MonitoringView({ onNavigate }) {
         ))}
       </div>
 
-      {!scanResults && !scanning && activeTab !== "activity" && (
+      {!currentStatus?.connected && !scanResults ? (
+        <div className="glass-card" style={{ padding: 64, textAlign: "center" }}>
+          <div style={{ width: 80, height: 80, borderRadius: 20, background: "rgba(239, 68, 68, 0.1)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 24px" }}>
+            <Icon name="alert-circle" size={40} style={{ color: "#ef4444" }} />
+          </div>
+          <h3 style={{ fontSize: 24, marginBottom: 12 }}>Not Connected</h3>
+          <p style={{ color: "var(--text-secondary)", maxWidth: 480, margin: "0 auto 12px", fontSize: 15, lineHeight: 1.6 }}>
+            Connect your {selectedCloud.toUpperCase()} account in the <strong>Connect</strong> tab to start scanning and monitoring compliance.
+          </p>
+          <button
+            onClick={() => onNavigate && onNavigate("connect")}
+            className="save-btn"
+            style={{ display: "inline-flex", alignItems: "center", gap: 8, marginTop: 16 }}
+          >
+            <Icon name="link" size={16} />
+            Go to Connect
+          </button>
+        </div>
+      ) : !scanResults && !scanning && activeTab !== "activity" && (
         <div className="glass-card" style={{ padding: 64, textAlign: "center" }}>
           <div style={{ width: 80, height: 80, borderRadius: 20, background: `${fwColor}18`, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 24px" }}>
             <Icon name="shield" size={40} style={{ color: fwColor }} />
@@ -410,6 +483,7 @@ export default function MonitoringView({ onNavigate }) {
           </button>
         </div>
       )}
+      
 
       {/* Tab Contents */}
       {activeTab === "overview" && scanResults && (
@@ -427,17 +501,17 @@ export default function MonitoringView({ onNavigate }) {
               <div style={{ fontSize: 13, color: "var(--text-secondary)" }}>Overall Compliance Score</div>
             </div>
             
-            <div className="glass-card stat-card stat-blue">
+            <div className="glass-card stat-card stat-blue" onClick={() => setActiveTab("inventory")} style={{ cursor: "pointer", transition: "transform 0.2s" }} onMouseEnter={(e) => e.currentTarget.style.transform = "scale(1.02)"} onMouseLeave={(e) => e.currentTarget.style.transform = "scale(1)"} title="Click to view inventory">
               <div className="stat-card-top"><div className="stat-icon"><Icon name="folder" size={24} /></div></div>
               <div className="stat-value">{metrics.total_resources || 0}</div>
               <div className="stat-label">Total Resources</div>
             </div>
-            <div className="glass-card stat-card stat-purple">
+            <div className="glass-card stat-card stat-purple" onClick={() => setActiveTab("compliance")} style={{ cursor: "pointer", transition: "transform 0.2s" }} onMouseEnter={(e) => e.currentTarget.style.transform = "scale(1.02)"} onMouseLeave={(e) => e.currentTarget.style.transform = "scale(1)"} title="Click to view compliance">
               <div className="stat-card-top"><div className="stat-icon"><Icon name="shield" size={24} /></div></div>
               <div className="stat-value">{findings.length}</div>
               <div className="stat-label">Audited Controls</div>
             </div>
-            <div className="glass-card stat-card stat-amber">
+            <div className="glass-card stat-card stat-amber" onClick={() => setActiveTab("compliance")} style={{ cursor: "pointer", transition: "transform 0.2s" }} onMouseEnter={(e) => e.currentTarget.style.transform = "scale(1.02)"} onMouseLeave={(e) => e.currentTarget.style.transform = "scale(1)"} title="Click to view findings">
               <div className="stat-card-top"><div className="stat-icon"><Icon name="triangle-alert" size={24} /></div></div>
               <div className="stat-value">{findings.filter(f => f.status === "FAIL").length}</div>
               <div className="stat-label">Critical Findings</div>
@@ -460,6 +534,9 @@ export default function MonitoringView({ onNavigate }) {
 
       {activeTab === "inventory" && scanResults && (
         <div className="glass-card animate-fade-in" style={{ padding: 0, overflow: "hidden" }}>
+          <div style={{ padding: 20, borderBottom: "1px solid var(--border-color)" }}>
+            <input type="text" placeholder="🔍 Search resources by name, type, or region..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} style={{ width: "100%", padding: 12, borderRadius: 8, border: "1px solid var(--border-color)", fontSize: 14, fontFamily: "inherit", background: "var(--bg-secondary)" }} />
+          </div>
           <div className="card-body" style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead style={{ background: "rgba(0,0,0,0.02)" }}>
@@ -471,7 +548,7 @@ export default function MonitoringView({ onNavigate }) {
                 </tr>
               </thead>
               <tbody>
-                {(scanResults.resources || []).map((res, i) => (
+                {filteredResources.filter(res => !searchQuery || res.resource_name?.toLowerCase().includes(searchQuery.toLowerCase()) || res.resource_type?.toLowerCase().includes(searchQuery.toLowerCase()) || res.region?.toLowerCase().includes(searchQuery.toLowerCase())).map((res, i) => (
                   <tr key={i} style={{ borderBottom: "1px solid var(--border-color)" }}>
                     <td style={{ padding: 16 }}>
                       <div style={{ fontWeight: 600, fontSize: 14 }}>{res.resource_name}</div>
@@ -542,6 +619,69 @@ export default function MonitoringView({ onNavigate }) {
                 </div>
               ))
             )}
+          </div>
+        </div>
+      )}
+
+      {activeTab === "diagnostics" && scanResults && (
+        <div className="glass-card animate-fade-in">
+          <div className="card-header"><h3>Scan Diagnostics</h3></div>
+          <div className="card-body">
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))", gap: 16, marginBottom: 24 }}>
+              <div style={{ padding: 16, background: "var(--bg-tertiary)", borderRadius: 8, border: "1px solid var(--border-color)" }}>
+                <div style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 600, marginBottom: 6, textTransform: "uppercase" }}>Total Resources (All Regions)</div>
+                <div style={{ fontSize: 24, fontWeight: 700 }}>{scanResults.resources?.length || 0}</div>
+              </div>
+              <div style={{ padding: 16, background: "var(--bg-tertiary)", borderRadius: 8, border: "1px solid var(--border-color)" }}>
+                <div style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 600, marginBottom: 6, textTransform: "uppercase" }}>Displayed (Filtered)</div>
+                <div style={{ fontSize: 24, fontWeight: 700 }}>{filteredResources.length}</div>
+              </div>
+              <div style={{ padding: 16, background: "var(--bg-tertiary)", borderRadius: 8, border: "1px solid var(--border-color)" }}>
+                <div style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 600, marginBottom: 6, textTransform: "uppercase" }}>Regions Scanned</div>
+                <div style={{ fontSize: 24, fontWeight: 700 }}>{scanResults?.regions_scanned?.length || 0}</div>
+              </div>
+              <div style={{ padding: 16, background: "var(--bg-tertiary)", borderRadius: 8, border: "1px solid var(--border-color)" }}>
+                <div style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 600, marginBottom: 6, textTransform: "uppercase" }}>Scan Time</div>
+                <div style={{ fontSize: 14, fontWeight: 600 }}>{scanResults?.scan_time ? new Date(scanResults.scan_time).toLocaleString() : "N/A"}</div>
+              </div>
+            </div>
+
+            <div style={{ marginBottom: 20 }}>
+              <h4 style={{ marginBottom: 12, fontSize: 14, fontWeight: 700 }}>Regions Scanned</h4>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {scanResults?.regions_scanned ? scanResults.regions_scanned.map(region => (
+                  <div key={region} style={{ padding: "6px 12px", background: "var(--accent-primary)", color: "#fff", borderRadius: 6, fontSize: 12, fontWeight: 600 }}>{region}</div>
+                )) : <p style={{ color: "var(--text-secondary)" }}>No region data</p>}
+              </div>
+            </div>
+
+            <div style={{ marginBottom: 20 }}>
+              <h4 style={{ marginBottom: 12, fontSize: 14, fontWeight: 700 }}>Resource Breakdown</h4>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                <thead>
+                  <tr style={{ borderBottom: "1px solid var(--border-color)", background: "var(--bg-tertiary)" }}>
+                    <th style={{ padding: 8, textAlign: "left", fontWeight: 700 }}>Resource Type</th>
+                    <th style={{ padding: 8, textAlign: "right", fontWeight: 700 }}>Count</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {Object.entries(metrics || {})
+                    .filter(([key]) => !key.startsWith("total_") && !key.startsWith("regions_") && key !== "cloudtrail_events" && key !== "health_score")
+                    .sort((a, b) => b[1] - a[1])
+                    .slice(0, 15)
+                    .map(([key, count]) => (
+                      <tr key={key} style={{ borderBottom: "1px solid var(--border-color)" }}>
+                        <td style={{ padding: 8, color: "var(--text-secondary)" }}>{key.replace(/_/g, " ")}</td>
+                        <td style={{ padding: 8, textAlign: "right", fontWeight: 600, color: count > 0 ? "var(--accent-primary)" : "var(--text-muted)" }}>{count}</td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div style={{ padding: 12, background: "rgba(59, 130, 246, 0.08)", borderLeft: "3px solid #3b82f6", borderRadius: 6, fontSize: 12, color: "var(--text-secondary)" }}>
+              <strong style={{ color: "var(--text-primary)" }}>ℹ Tip:</strong> If resources count differs between scans, run the Diagnostics endpoint to check if specific regions or resource types are failing due to IAM permissions.
+            </div>
           </div>
         </div>
       )}

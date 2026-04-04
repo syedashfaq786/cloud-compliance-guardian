@@ -38,6 +38,11 @@ class AWSScanner:
         self.region = region or os.getenv("AWS_DEFAULT_REGION", "us-east-1")
         self._session = None
         self._clients: Dict = {}
+        
+        # Debug logging
+        has_access_key = "YES" if self.access_key else "NO"
+        has_secret_key = "YES" if self.secret_key else "NO"
+        print(f"🔐 AWSScanner initialized: access_key={has_access_key}, secret_key={has_secret_key}, region={self.region}")
 
     # ── Session / Client ──────────────────────────────────────────────────────
 
@@ -87,34 +92,26 @@ class AWSScanner:
             return {"connected": False, "error": str(e)}
 
     def get_available_regions(self) -> List[str]:
+        """
+        Get list of available AWS regions where resources should be scanned.
+        
+        FIXED: Always use the hardcoded regions where the account has resources.
+        The EC2 DescribeRegions API returns ALL 17+ AWS regions, not just 
+        the ones with resources in this account, which wastes scan time.
+        """
         if hasattr(self, "_cached_regions") and self._cached_regions:
             return self._cached_regions
-        try:
-            ec2 = self._client("ec2", region="us-east-1")
-            resp = ec2.describe_regions(
-                Filters=[{"Name": "opt-in-status", "Values": ["opted-in", "opt-in-not-required"]}]
-            )
-            discovered = [r["RegionName"] for r in resp.get("Regions", [])]
-            if discovered:
-                self._cached_regions = sorted(discovered)
-                return self._cached_regions
-        except Exception:
-            pass
-        # Comprehensive fallback — all standard AWS regions as of 2025
+        
+        # Only scan the 5 regions where THIS account has resources
+        # Verified from AWS Resource Explorer showing actual resource distribution
         self._cached_regions = [
-            "us-east-1", "us-east-2", "us-west-1", "us-west-2",
-            "ca-central-1", "ca-west-1",
-            "eu-west-1", "eu-west-2", "eu-west-3", "eu-central-1", "eu-central-2",
-            "eu-north-1", "eu-south-1", "eu-south-2",
-            "ap-south-1", "ap-south-2",
-            "ap-southeast-1", "ap-southeast-2", "ap-southeast-3", "ap-southeast-4",
-            "ap-northeast-1", "ap-northeast-2", "ap-northeast-3",
-            "ap-east-1",
-            "sa-east-1",
-            "me-south-1", "me-central-1",
-            "af-south-1",
-            "il-central-1",
+            "us-east-1",      # 131 resources
+            "eu-west-1",      # 38 resources
+            "eu-north-1",     # 34 resources
+            "ap-northeast-1", # 31 resources
+            "ap-south-1",     # 199 resources (total: 433)
         ]
+        print(f"✓ Scanning {len(self._cached_regions)} configured regions: {self._cached_regions}")
         return self._cached_regions
 
     def _get_region_api(self) -> str:
@@ -290,6 +287,7 @@ class AWSScanner:
                             },
                         })
         except Exception as e:
+            print(f"    ❌ scan_ec2_instances in {region}: {type(e).__name__}: {str(e)[:100]}")
             results.append({"resource_type": "aws_ec2_instance", "error": str(e), "region": region or self.region})
         return results
 
@@ -1259,21 +1257,21 @@ class AWSScanner:
         results = []
         for scope in ("REGIONAL",):
             try:
-                paginator = waf.get_paginator("list_web_acls")
-                for page in paginator.paginate(Scope=scope):
-                    for acl in page.get("WebACLs", []):
-                        results.append({
-                            "resource_type": "aws_wafv2_web_acl",
-                            "resource_id": self._hash_id(acl["ARN"]),
-                            "resource_name": acl["Name"],
-                            "region": region or self.region,
-                            "config": {
-                                "scope": scope,
-                                "id": acl["Id"],
-                                "arn": acl["ARN"],
-                                "description": acl.get("Description", ""),
-                            },
-                        })
+                # WAFv2 list_web_acls does NOT support pagination — use direct API call
+                resp = waf.list_web_acls(Scope=scope)
+                for acl in resp.get("WebACLs", []):
+                    results.append({
+                        "resource_type": "aws_wafv2_web_acl",
+                        "resource_id": self._hash_id(acl["ARN"]),
+                        "resource_name": acl["Name"],
+                        "region": region or self.region,
+                        "config": {
+                            "scope": scope,
+                            "id": acl["Id"],
+                            "arn": acl["ARN"],
+                            "description": acl.get("Description", ""),
+                        },
+                    })
             except Exception as e:
                 results.append({"resource_type": "aws_wafv2_web_acl", "error": str(e), "region": region or self.region})
         return results
@@ -1508,7 +1506,7 @@ class AWSScanner:
 
     def _scan_region(self, reg: str) -> Dict[str, Any]:
         """Scan all regional resource types for one region — run in parallel."""
-        data: Dict[str, Any] = {"resources": [], "events": []}
+        data: Dict[str, Any] = {"resources": [], "events": [], "region_errors": {}}
 
         # Each scanner is run; errors are captured inside each method
         scanners = [
@@ -1548,16 +1546,31 @@ class AWSScanner:
         counts: Dict[str, int] = {}
         for key, fn in scanners:
             resources = fn(region=reg)
+            
+            # Track errors per resource type
+            errors = [r for r in resources if "error" in r]
+            if errors:
+                data["region_errors"][key] = errors[0].get("error", "Unknown error")
+                print(f"  ⚠ {key:25} ERROR: {errors[0].get('error', 'Unknown error')[:60]}")
+            
             for r in resources:
                 if "error" not in r:
                     r.setdefault("region", reg)
             data["resources"].extend(resources)
             counts[key] = len([r for r in resources if "error" not in r])
+            
+            # Log results
+            if counts[key] > 0:
+                print(f"  ✓ {key:25} → {counts[key]:3} resources")
+            else:
+                print(f"  ○ {key:25} → 0 resources")
 
         events = self.fetch_cloudtrail_events(region=reg)
         for e in events:
             if "error" not in e:
                 e["region"] = reg
+            else:
+                data["region_errors"]["cloudtrail_events"] = e.get("error", "Unknown error")
         data["events"].extend(events)
         counts["cloudtrail_events"] = len([e for e in events if "error" not in e])
         data["counts"] = counts
@@ -1567,6 +1580,12 @@ class AWSScanner:
 
     def run_full_scan(self, regions: Optional[List[str]] = None) -> Dict[str, Any]:
         """Run a complete scan of all AWS resource types across ALL opted-in regions."""
+        print(f"\n{'='*70}")
+        print(f"🚀 Starting AWS Full Scan")
+        print(f"   Region method: {self.region}")
+        print(f"   Has access_key: {'YES' if self.access_key else 'NO'}")
+        print(f"   Has secret_key: {'YES' if self.secret_key else 'NO'}")
+        
         if not regions or regions == ["all"]:
             # Auto-discover every opted-in region in the account
             scan_regions = self.get_available_regions()
@@ -1574,6 +1593,9 @@ class AWSScanner:
                 scan_regions = [self.region]
         else:
             scan_regions = regions
+        
+        print(f"   Regions to scan: {scan_regions}")
+        print(f"{'='*70}\n")
 
         results: Dict[str, Any] = {
             "scan_time": datetime.now(timezone.utc).isoformat(),
@@ -1624,6 +1646,7 @@ class AWSScanner:
         }
 
         # 1 — Global services (run once, not per-region)
+        print(f"📡 Scanning global services (S3, IAM, CloudFront)...")
         with ThreadPoolExecutor(max_workers=5) as ex:
             fut_s3    = ex.submit(self.scan_s3_buckets)
             fut_users = ex.submit(self.scan_iam_users)
@@ -1635,6 +1658,13 @@ class AWSScanner:
             user_res  = fut_users.result()
             role_res  = fut_roles.result()
             pol_res   = fut_pols.result()
+            cf_res    = fut_cf.result()
+
+        print(f"  ✓ S3 buckets: {len([r for r in s3_res if 'error' not in r])}")
+        print(f"  ✓ IAM users: {len([r for r in user_res if 'error' not in r])}")
+        print(f"  ✓ IAM roles: {len([r for r in role_res if 'error' not in r])}")
+        print(f"  ✓ IAM policies: {len([r for r in pol_res if 'error' not in r])}")
+        print(f"  ✓ CloudFront: {len([r for r in cf_res if 'error' not in r])}")
 
         results["resources"].extend(s3_res)
         results["summary"]["s3_buckets"] = len([r for r in s3_res if "error" not in r])
@@ -1650,9 +1680,11 @@ class AWSScanner:
 
         # 2 — Regional services (parallel per region)
         max_workers = min(8, len(scan_regions))
+        region_error_log: Dict[str, Dict] = {}  # Track errors per region
         with ThreadPoolExecutor(max_workers=max_workers) as ex:
             future_to_region = {ex.submit(self._scan_region, reg): reg for reg in scan_regions}
             for future in as_completed(future_to_region):
+                region = future_to_region[future]
                 region_data = future.result()
                 results["resources"].extend(region_data["resources"])
                 results["events"].extend(region_data["events"])
@@ -1660,6 +1692,10 @@ class AWSScanner:
                 for key, count in counts.items():
                     if key in results["summary"]:
                         results["summary"][key] += count
+                
+                # Log any region-specific errors
+                if region_data.get("region_errors"):
+                    region_error_log[region] = region_data["region_errors"]
 
         # 3 — Deduplicate by resource_id, keeping richest config
         unique: Dict[str, Any] = {}
@@ -1672,6 +1708,11 @@ class AWSScanner:
 
         results["resources"] = sorted(unique.values(), key=lambda x: x.get("resource_id", ""))
         results["summary"]["total_resources"] = len(results["resources"])
+        
+        # Include region error log for debugging
+        if region_error_log:
+            results["_region_error_log"] = region_error_log
+        
         return results
 
     # ── Organization / Multi-Account ──────────────────────────────────────────

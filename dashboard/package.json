@@ -8,6 +8,7 @@
     "start": "next start"
   },
   "dependencies": {
+    "@reactflow/node-resizer": "^2.2.14",
     "chart.js": "^4.5.1",
     "d3": "^7.9.0",
     "d3-drag": "^3.0.0",

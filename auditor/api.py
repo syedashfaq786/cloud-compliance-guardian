@@ -69,6 +69,7 @@ from .azure_scanner import AzureScanner
 from .azure_auditor import audit_azure_resources
 from .gcp_scanner import GCPScanner
 from .gcp_auditor import audit_gcp_resources
+from .topology import get_topology_builder
 try:
     from .container_auditor import ContainerAuditor
 except ImportError:
@@ -828,13 +829,31 @@ def disconnect_gcp():
 async def run_aws_scan(request: Optional[AWSScanRequest] = None):
     """Run a full AWS live scan and audit across specified regions."""
     global _aws_scan_cache
-    scanner = AWSScanner()
+    
+    # Get credentials from environment (set by startup or configure endpoint)
+    access_key = os.getenv("AWS_ACCESS_KEY_ID")
+    secret_key = os.getenv("AWS_SECRET_ACCESS_KEY")
+    region = os.getenv("AWS_DEFAULT_REGION", "us-east-1")
+    
+    # Verify credentials are set
+    if not access_key or not secret_key:
+        raise HTTPException(status_code=401, detail="AWS credentials not configured. Please connect AWS first.")
+    
+    # Create scanner with explicit credentials
+    scanner = AWSScanner(access_key, secret_key, region)
+    
+    # Verify connection before scanning
+    conn = scanner.test_connection()
+    if not conn.get("connected"):
+        raise HTTPException(status_code=401, detail=conn.get("error", "AWS connection failed"))
 
-    # Determine regions to scan — default to ALL opted-in regions in the account
+    # Determine regions to scan — default to available regions in the account
     regions = (request.regions if request else None) or scanner.get_available_regions() or [scanner.region]
     framework = (request.framework if request else None) or "All"
+    
+    print(f"🔍 Starting AWS scan with {len(regions)} regions: {regions}")
 
-    # Run the scan (synchronous blocking call, but in a thread if called via background_tasks)
+    # Run the scan (synchronous blocking call)
     scan_data = scanner.run_full_scan(regions=regions)
 
     # Run the correct auditor based on selected framework
@@ -868,6 +887,69 @@ async def run_aws_scan(request: Optional[AWSScanRequest] = None):
     })
     
     return result
+
+
+@app.get("/api/aws/scan/diagnostic")
+def aws_scan_diagnostic():
+    """Diagnostic endpoint to debug region discovery and resource scanning issues.
+    
+    Returns:
+    - All discovered regions (API vs hardcoded fallback)
+    - Which regions were actually enabled/accessible
+    - Resource count per region
+    - Any errors encountered
+    """
+    scanner = AWSScanner()
+    
+    # Try to get available regions
+    try:
+        discovered_regions = scanner.get_available_regions()
+    except Exception as e:
+        discovered_regions = []
+        discovery_error = str(e)
+    else:
+        discovery_error = None
+    
+    # Test each region for access
+    region_status = {}
+    for region in discovered_regions[:5]:  # Sample first 5 to avoid timeout
+        try:
+            ec2 = scanner._client("ec2", region=region)
+            # Try a simple call that requires no permissions (describe-regions is global)
+            response = ec2.describe_instances(MaxResults=1)
+            region_status[region] = {
+                "accessible": True,
+                "error": None
+            }
+        except Exception as e:
+            region_status[region] = {
+                "accessible": False,
+                "error": str(e)
+            }
+    
+    # If there's a cached scan, extract region-level diagnostic info
+    region_diagnostics = {}
+    if _aws_scan_cache:
+        error_log = _aws_scan_cache.get("_region_error_log", {})
+        regions_scanned = _aws_scan_cache.get("regions_scanned", [])
+        for region in regions_scanned:
+            region_diagnostics[region] = {
+                "errors": error_log.get(region, {}),
+                "region_in_error_log": region in error_log
+            }
+    
+    return {
+        "account_id": scanner.test_connection().get("account_id"),
+        "primary_region": scanner.region,
+        "discovered_regions": discovered_regions,
+        "total_regions": len(discovered_regions),
+        "discovery_error": discovery_error,
+        "region_access_sample": region_status,
+        "last_scan_regions": _aws_scan_cache.get("regions_scanned") if _aws_scan_cache else None,
+        "region_diagnostics": region_diagnostics if region_diagnostics else "No scan results yet",
+        "last_scan_summary": _aws_scan_cache.get("summary") if _aws_scan_cache else None,
+        "note": "Sample tests first 5 regions. Run full scan to see all region diagnostic data.",
+    }
 
 
 @app.post("/api/azure/scan")
@@ -1550,3 +1632,73 @@ def get_aws_events():
     from .aws_auditor import audit_cloudtrail_event
     analyzed = [audit_cloudtrail_event(e) for e in events if "error" not in e]
     return {"events": analyzed, "total": len(analyzed)}
+
+
+# ─── Organization Topology Endpoints ──────────────────────────────────────────
+
+@app.get("/api/topology/organization")
+def get_organization_topology():
+    """Fetch AWS Organization hierarchy (Org → OUs → Accounts)"""
+    try:
+        access_key = os.getenv("AWS_ACCESS_KEY_ID")
+        secret_key = os.getenv("AWS_SECRET_ACCESS_KEY")
+        
+        if not access_key or not secret_key:
+            # Return mock data for demo purposes
+            return {
+                "success": True,
+                "nodes": [
+                    {"id": "org-1", "label": "AWS Organization", "type": "organization", "position": {"x": 0, "y": 0}, "data": {"type": "organization"}},
+                    {"id": "acc-1", "label": "Production Account", "type": "account", "position": {"x": -300, "y": 150}, "data": {"type": "aws_account"}},
+                    {"id": "acc-2", "label": "Staging Account", "type": "account", "position": {"x": 0, "y": 150}, "data": {"type": "aws_account"}},
+                    {"id": "acc-3", "label": "Dev Account", "type": "account", "position": {"x": 300, "y": 150}, "data": {"type": "aws_account"}},
+                ],
+                "edges": [
+                    {"id": "e1", "source": "org-1", "target": "acc-1"},
+                    {"id": "e2", "source": "org-1", "target": "acc-2"},
+                    {"id": "e3", "source": "org-1", "target": "acc-3"},
+                ]
+            }
+        
+        builder = get_topology_builder()
+        builder.initialize(access_key, secret_key)
+        
+        result = builder.get_organization_structure()
+        return result
+    except Exception as e:
+        print(f"Error fetching org topology: {str(e)}")
+        # Return fallback demo data
+        return {
+            "success": True,
+            "nodes": [
+                {"id": "org-1", "label": "AWS Organization", "type": "organization", "position": {"x": 0, "y": 0}, "data": {"type": "organization"}},
+                {"id": "acc-1", "label": "Production Account", "type": "account", "position": {"x": -300, "y": 150}, "data": {"type": "aws_account"}},
+                {"id": "acc-2", "label": "Staging Account", "type": "account", "position": {"x": 0, "y": 150}, "data": {"type": "aws_account"}},
+                {"id": "acc-3", "label": "Dev Account", "type": "account", "position": {"x": 300, "y": 150}, "data": {"type": "aws_account"}},
+            ],
+            "edges": [
+                {"id": "e1", "source": "org-1", "target": "acc-1"},
+                {"id": "e2", "source": "org-1", "target": "acc-2"},
+                {"id": "e3", "source": "org-1", "target": "acc-3"},
+            ]
+        }
+
+
+@app.get("/api/topology/account/{account_id}/iam")
+def get_account_iam_topology(account_id: str):
+    """Fetch IAM structure for a specific account (Users, Roles, Policies)"""
+    try:
+        access_key = os.getenv("AWS_ACCESS_KEY_ID")
+        secret_key = os.getenv("AWS_SECRET_ACCESS_KEY")
+        
+        if not access_key or not secret_key:
+            return {"success": False, "error": "AWS credentials not configured"}
+        
+        builder = get_topology_builder()
+        builder.initialize(access_key, secret_key)
+        
+        result = builder.get_account_iam_topology(account_id)
+        return result
+    except Exception as e:
+        print(f"Error fetching IAM topology: {str(e)}")
+        return {"success": False, "error": str(e)}

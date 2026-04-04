@@ -2,7 +2,7 @@
 import { useState, useRef, useEffect } from "react";
 import { Icon } from "./Icons";
 
-const API = "http://localhost:8001";
+const API = "http://127.0.0.1:8000";
 
 export default function ConnectView() {
   const [selectedProvider, setSelectedProvider] = useState(null);
@@ -82,11 +82,17 @@ export default function ConnectView() {
     setAwsConfiguring(true);
     setAwsError("");
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+      
       const res = await fetch(`${API}/api/aws/configure`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ access_key: accessKey.trim(), secret_key: secretKey.trim(), region: awsRegion }),
+        signal: controller.signal
       });
+      clearTimeout(timeoutId);
+      
       const data = await res.json();
       if (data.status === "connected") {
         setAwsStatus({ connected: true, ...data });
@@ -94,13 +100,17 @@ export default function ConnectView() {
         setAccessKey("");
         setSecretKey("");
         // Notify user about auto-discovery
-        setAwsError("Success! Background discovery and topology generation started.");
-        setTimeout(() => setAwsError(""), 5000); 
+        setAwsError("✓ Connected! Starting background discovery...");
+        setTimeout(() => setAwsError(""), 4000); 
       } else {
         setAwsError(data.message || "Invalid credentials");
       }
-    } catch {
-      setAwsError("Failed to connect");
+    } catch (err) {
+      if (err.name === "AbortError") {
+        setAwsError("Connection timeout (30s) - please check your credentials and try again");
+      } else {
+        setAwsError("Failed to connect - check your credentials and try again");
+      }
     } finally {
       setAwsConfiguring(false);
     }
@@ -131,6 +141,9 @@ export default function ConnectView() {
     setAzureConfiguring(true);
     setAzureError("");
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000);
+      
       const res = await fetch(`${API}/api/azure/configure`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -140,17 +153,26 @@ export default function ConnectView() {
           client_secret: azureClientSecret.trim(),
           subscription_id: azureSubscriptionId.trim()
         }),
+        signal: controller.signal
       });
+      clearTimeout(timeoutId);
+      
       const data = await res.json();
       if (data.status === "connected") {
         setAzureStatus({ connected: true, ...data });
         setShowAzureConfig(false);
-        setAzureError("Success! Background discovery and topology generation started.");
-        setTimeout(() => setAzureError(""), 5000);
+        setAzureError("✓ Connected! Starting background discovery...");
+        setTimeout(() => setAzureError(""), 4000);
       } else { setAzureError(data.message || "Failed to connect"); }
-    } catch { setAzureError("Failed to connect to Azure"); }
+    } catch (err) {
+      if (err.name === "AbortError") {
+        setAzureError("Connection timeout (30s) - please check your credentials");
+      } else {
+        setAzureError("Failed to connect to Azure");
+      }
+    }
     finally { setAzureConfiguring(false); }
-  };
+  }
 
   const handleAzureDisconnect = async () => {
     try {
@@ -177,6 +199,9 @@ export default function ConnectView() {
     setGcpConfiguring(true);
     setGcpError("");
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000);
+      
       const res = await fetch(`${API}/api/gcp/configure`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -184,15 +209,24 @@ export default function ConnectView() {
           project_id: gcpProjectId.trim(),
           service_account_json: gcpServiceAccountJson.trim()
         }),
+        signal: controller.signal
       });
+      clearTimeout(timeoutId);
+      
       const data = await res.json();
       if (data.status === "connected") {
         setGcpStatus({ connected: true, ...data });
         setShowGcpConfig(false);
-        setGcpError("Success! Background discovery and topology generation started.");
-        setTimeout(() => setGcpError(""), 5000);
+        setGcpError("✓ Connected! Starting background discovery...");
+        setTimeout(() => setGcpError(""), 4000);
       } else { setGcpError(data.message || "Failed to connect"); }
-    } catch { setGcpError("Failed to connect to GCP"); }
+    } catch (err) {
+      if (err.name === "AbortError") {
+        setGcpError("Connection timeout (30s) - please check your credentials");
+      } else {
+        setGcpError("Failed to connect to GCP");
+      }
+    }
     finally { setGcpConfiguring(false); }
   };
 
