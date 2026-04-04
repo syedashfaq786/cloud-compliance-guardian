@@ -347,6 +347,14 @@ export function Icon({ name, size = 20, className = "", style = {} }) {
         <circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" />
       </svg>
     ),
+    topology: (
+      <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="12" r="3" />
+        <circle cx="6" cy="19" r="3" />
+        <circle cx="18" cy="19" r="3" />
+        <path d="M12 12v4M12 16H6v3M12 16h6v3" />
+      </svg>
+    ),
   };
 
   return (

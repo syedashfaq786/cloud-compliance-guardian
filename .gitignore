@@ -43,3 +43,4 @@ auditor/.data/
 .DS_Store
 Thumbs.db
 
+backend/app/repos/

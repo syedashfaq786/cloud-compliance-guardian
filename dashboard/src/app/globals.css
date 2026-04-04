@@ -5,13 +5,15 @@
   --bg-primary: #f5f6fa;
   --bg-secondary: #ffffff;
   --bg-card: #ffffff;
+  --bg-tertiary: #f0f2f7;
   --bg-glass: rgba(255, 255, 255, 0.9);
   --border-glass: #e8ecf1;
+  --border-color: #e8ecf1;
   --border-glow: rgba(255, 122, 0, 0.2);
 
   --text-primary: #1a1d2e;
-  --text-secondary: #6b7280;
-  --text-muted: #9ca3af;
+  --text-secondary: #4b5563;
+  --text-muted: #6b7280;
 
   --accent-blue: #4f6ef7;
   --accent-cyan: #22d3ee;
@@ -21,6 +23,7 @@
   --accent-red: #ef4444;
   --accent-orange: #ff9f43;
   --accent-pink: #f472b6;
+  --accent-primary: #ff7a00;
 
   --gradient-hero: linear-gradient(135deg, #ff7a00 0%, #ff9f43 100%);
   --gradient-card: linear-gradient(135deg, rgba(255, 122, 0, 0.05), rgba(255, 159, 67, 0.02));
@@ -47,13 +50,16 @@
   --bg-primary: #0f1117;
   --bg-secondary: #1a1d2e;
   --bg-card: #1e2235;
+  --bg-tertiary: #252840;
   --bg-glass: rgba(30, 34, 53, 0.9);
   --border-glass: rgba(255, 255, 255, 0.08);
+  --border-color: rgba(255, 255, 255, 0.08);
   --border-glow: rgba(255, 122, 0, 0.25);
 
   --text-primary: #f1f5f9;
   --text-secondary: #94a3b8;
   --text-muted: #64748b;
+  --accent-primary: #ff7a00;
 
   --shadow-card: 0 2px 16px rgba(0, 0, 0, 0.3), 0 1px 4px rgba(0, 0, 0, 0.15);
   --shadow-glow: 0 4px 24px rgba(255, 122, 0, 0.12);
@@ -2071,22 +2077,25 @@ body::before {
   gap: 6px;
   padding: 8px 16px;
   background: var(--bg-card);
-  border: 1px solid var(--border-glass);
+  border: 1px solid var(--border-color);
   border-radius: 8px;
-  color: var(--text-secondary);
-  font-size: 12px;
+  color: var(--text-primary);
+  font-size: 13px;
   font-weight: 600;
+  font-family: 'Inter', sans-serif;
   cursor: pointer;
   transition: all 0.2s ease;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.06);
 }
 
 .download-btn:hover {
-  background: var(--accent-primary);
+  background: var(--accent-amber);
   color: #fff;
-  border-color: var(--accent-primary);
+  border-color: var(--accent-amber);
+  box-shadow: 0 4px 12px rgba(255,122,0,0.25);
 }
 
 .download-btn:disabled {
-  opacity: 0.5;
+  opacity: 0.45;
   cursor: not-allowed;
 }

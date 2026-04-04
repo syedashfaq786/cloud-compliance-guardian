@@ -40,6 +40,69 @@ SEVERITY_COLORS = {
     "LOW": LOW_BLUE,
 }
 
+# ─── Framework Metadata ───────────────────────────────────────────────────────
+
+FRAMEWORK_META = {
+    "CIS": {
+        "full_name": "CIS Benchmarks",
+        "version": "v3.0.0 (2024)",
+        "org": "Center for Internet Security",
+        "description": "CIS Benchmark controls for AWS, Azure, and GCP infrastructure hardening",
+        "disclaimer": (
+            "Findings are based on analysis against CIS Benchmark controls "
+            "(AWS v3.0.0, Azure v2.1.0, GCP v2.0.0). "
+            "CIS Benchmarks are consensus-based configuration guidelines. "
+            "Always validate findings against your organization's risk tolerance."
+        ),
+    },
+    "NIST": {
+        "full_name": "NIST SP 800-53 Rev 5",
+        "version": "Rev 5 (2020)",
+        "org": "National Institute of Standards and Technology",
+        "description": "NIST 800-53 security and privacy controls for information systems",
+        "disclaimer": (
+            "Findings are mapped to NIST SP 800-53 Revision 5 security controls. "
+            "NIST 800-53 provides a catalog of security and privacy controls for federal "
+            "information systems and organizations. Validate against your ATO requirements."
+        ),
+    },
+    "CCM": {
+        "full_name": "CSA Cloud Controls Matrix v4.1",
+        "version": "v4.1 (2021)",
+        "org": "Cloud Security Alliance",
+        "description": "CSA CCM v4.1 controls across 17 domains for cloud security assurance",
+        "disclaimer": (
+            "Findings are mapped to the CSA Cloud Controls Matrix (CCM) v4.1. "
+            "CCM v4.1 covers 207 controls across 17 domains designed for cloud environments. "
+            "Refer to the CSA CAIQ and STAR program for customer-facing assurance."
+        ),
+    },
+    "All": {
+        "full_name": "All Frameworks",
+        "version": "CIS + NIST + CCM",
+        "org": "CIS · NIST · CSA",
+        "description": "Combined CIS Benchmarks, NIST 800-53, and CSA CCM v4.1 controls",
+        "disclaimer": (
+            "Findings are based on analysis against CIS Benchmark, NIST SP 800-53 Rev 5, "
+            "and CSA Cloud Controls Matrix v4.1 controls. "
+            "Always validate findings against your organization's specific security requirements."
+        ),
+    },
+}
+
+
+def _framework_meta(framework: str) -> dict:
+    """Return display metadata for a given framework key."""
+    return FRAMEWORK_META.get(framework, FRAMEWORK_META["All"])
+
+
+def _compute_score(findings: list) -> float:
+    """Compute compliance score from a findings list (passed / total * 100)."""
+    if not findings:
+        return 0.0
+    passed = sum(1 for f in findings if f.get("status") == "PASS")
+    return round((passed / len(findings)) * 100, 1)
+
 
 def _get_styles():
     """Create custom paragraph styles for the report."""
@@ -158,7 +221,7 @@ def _score_color(score: float):
     return FAIL_RED
 
 
-def generate_pdf_report(audit_data: Dict[str, Any], findings_data: List[Dict[str, Any]]) -> bytes:
+def generate_pdf_report(audit_data: Dict[str, Any], findings_data: List[Dict[str, Any]], framework_label: str = "", framework: str = "All") -> bytes:
     """Generate a professional PDF audit report.
 
     Returns the PDF as bytes.
@@ -175,6 +238,7 @@ def generate_pdf_report(audit_data: Dict[str, Any], findings_data: List[Dict[str
 
     styles = _get_styles()
     story = []
+    fw = _framework_meta(framework)
 
     # ═══════════════════════════════════════════════════════════════════════
     # COVER / TITLE SECTION
@@ -182,7 +246,16 @@ def generate_pdf_report(audit_data: Dict[str, Any], findings_data: List[Dict[str
 
     story.append(Spacer(1, 30))
     story.append(Paragraph("Cloud Compliance Guardian", styles["ReportTitle"]))
-    story.append(Paragraph("Infrastructure Compliance Audit Report", styles["ReportSubtitle"]))
+    subtitle = f"Infrastructure Compliance Audit Report — {fw['full_name']}"
+    story.append(Paragraph(subtitle, styles["ReportSubtitle"]))
+    # Framework badge row
+    story.append(Paragraph(
+        f'<b>Framework:</b> {fw["full_name"]} &nbsp;|&nbsp; '
+        f'<b>Version:</b> {fw["version"]} &nbsp;|&nbsp; '
+        f'<b>Published by:</b> {fw["org"]}',
+        styles["SmallMuted"]
+    ))
+    story.append(Spacer(1, 8))
 
     # Report metadata table
     audit_id = audit_data.get("audit_id", "N/A")
@@ -225,20 +298,21 @@ def generate_pdf_report(audit_data: Dict[str, Any], findings_data: List[Dict[str
     story.append(HRFlowable(width="100%", thickness=1, color=BRAND_ORANGE, spaceAfter=4))
     story.append(Paragraph("1. Executive Summary", styles["SectionHeader"]))
 
-    score = audit_data.get("compliance_score", 0)
-    grade = _score_grade(score)
-    grade_color = _score_color(score)
-
+    # Always compute score from the (already-filtered) findings_data
     failed = [f for f in findings_data if f.get("status") == "FAIL"]
     passed = [f for f in findings_data if f.get("status") == "PASS"]
     total_checks = len(findings_data)
+    score = _compute_score(findings_data) if total_checks > 0 else float(audit_data.get("compliance_score", 0))
+    grade = _score_grade(score)
+    grade_color = _score_color(score)
 
     # Score + summary table side by side
     score_text = f'<font color="{grade_color.hexval()}" size="28"><b>{score:.1f}%</b></font>'
     grade_text = f'<font color="{grade_color.hexval()}" size="14">Grade: {grade}</font>'
 
     summary_items = [
-        f"<b>Total Checks:</b> {total_checks}",
+        f"<b>Framework:</b> {fw['full_name']}",
+        f"<b>Total Checks ({framework}):</b> {total_checks}",
         f'<b>Passed:</b> <font color="{PASS_GREEN.hexval()}">{len(passed)}</font>',
         f'<b>Failed:</b> <font color="{FAIL_RED.hexval()}">{len(failed)}</font>',
         f"<b>Resources Scanned:</b> {audit_data.get('resources_scanned', 0)}",
@@ -507,10 +581,8 @@ def generate_pdf_report(audit_data: Dict[str, Any], findings_data: List[Dict[str
     story.append(HRFlowable(width="100%", thickness=0.5, color=BORDER_GRAY))
     story.append(Spacer(1, 8))
     story.append(Paragraph(
-        "<i>This report was automatically generated by Cloud Compliance Guardian. "
-        "Findings are based on static analysis of Terraform configurations against "
-        "CIS Benchmark and NIST 800-53 controls. Always validate findings against your "
-        "organization's specific security requirements and risk tolerance.</i>",
+        f"<i>This report was automatically generated by Cloud Compliance Guardian. "
+        f"{fw['disclaimer']}</i>",
         styles["SmallMuted"]
     ))
 
@@ -533,25 +605,38 @@ def generate_aws_pdf_report(scan_cache: Dict[str, Any]) -> bytes:
     scan = scan_cache.get("scan", {})
     region = scan_cache.get("region", "unknown")
     scan_time = scan_cache.get("scan_time", "")
+    framework = scan_cache.get("framework", "All")
+    fw = _framework_meta(framework)
     findings = audit.get("findings", [])
-    health = audit.get("health_score", 0)
-    total_checks = audit.get("total_checks", 0)
-    passed = audit.get("passed", 0)
-    failed_count = audit.get("failed", 0)
+    # Always compute score from the filtered findings passed in
+    total_checks = len(findings)
+    passed = sum(1 for f in findings if f.get("status") == "PASS")
+    failed_count = sum(1 for f in findings if f.get("status") == "FAIL")
     failed = [f for f in findings if f.get("status") == "FAIL"]
     passed_findings = [f for f in findings if f.get("status") == "PASS"]
+    health = _compute_score(findings) if total_checks > 0 else float(audit.get("health_score", 0))
 
     # ═════════════════════════════════════════════════════════════════════
     # TITLE
     # ═════════════════════════════════════════════════════════════════════
     story.append(Spacer(1, 30))
     story.append(Paragraph("Cloud Compliance Guardian", styles["ReportTitle"]))
-    story.append(Paragraph("AWS Live Infrastructure Audit Report", styles["ReportSubtitle"]))
+    subtitle = f"AWS Live Infrastructure Audit Report — {fw['full_name']}"
+    story.append(Paragraph(subtitle, styles["ReportSubtitle"]))
+    # Framework badge row
+    story.append(Paragraph(
+        f'<b>Framework:</b> {fw["full_name"]} &nbsp;|&nbsp; '
+        f'<b>Version:</b> {fw["version"]} &nbsp;|&nbsp; '
+        f'<b>Published by:</b> {fw["org"]}',
+        styles["SmallMuted"]
+    ))
+    story.append(Spacer(1, 8))
 
     meta = [
         ["Cloud Provider", "Amazon Web Services (AWS)"],
         ["Region", region],
         ["Scan Time", scan_time or datetime.now(timezone.utc).strftime("%B %d, %Y at %H:%M UTC")],
+        ["Compliance Framework", f"{fw['full_name']} ({fw['version']})"],
         ["Resources Scanned", f"S3: {scan.get('s3_buckets', 0)}, Security Groups: {scan.get('security_groups', 0)}, IAM Policies: {scan.get('iam_policies', 0)}, IAM Users: {scan.get('iam_users', 0)}"],
     ]
     meta_table = Table(meta, colWidths=[120, 400])
@@ -579,7 +664,8 @@ def generate_aws_pdf_report(scan_cache: Dict[str, Any]) -> bytes:
     score_text = f'<font color="{grade_color.hexval()}" size="28"><b>{health:.1f}%</b></font>'
     grade_label = f'<font color="{grade_color.hexval()}" size="14">Grade: {grade}</font>'
     summary_items = [
-        f"<b>Total Checks:</b> {total_checks}",
+        f"<b>Framework:</b> {fw['full_name']}",
+        f"<b>Total Checks ({framework}):</b> {total_checks}",
         f'<b>Passed:</b> <font color="{PASS_GREEN.hexval()}">{passed}</font>',
         f'<b>Failed:</b> <font color="{FAIL_RED.hexval()}">{failed_count}</font>',
     ]
@@ -786,8 +872,9 @@ def generate_aws_pdf_report(scan_cache: Dict[str, Any]) -> bytes:
     story.append(HRFlowable(width="100%", thickness=0.5, color=BORDER_GRAY))
     story.append(Spacer(1, 8))
     story.append(Paragraph(
-        "<i>This report was generated by Cloud Compliance Guardian from a live AWS scan. "
-        "Findings reflect the real-time state of your AWS infrastructure at the time of scanning.</i>",
+        f"<i>This report was generated by Cloud Compliance Guardian from a live AWS scan. "
+        f"Findings reflect the real-time state of your AWS infrastructure at the time of scanning. "
+        f"{fw['disclaimer']}</i>",
         styles["SmallMuted"]
     ))
 

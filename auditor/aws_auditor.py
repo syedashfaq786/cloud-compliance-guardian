@@ -26,6 +26,7 @@ def audit_s3_bucket(resource: Dict[str, Any]) -> List[Dict[str, Any]]:
         findings.append({
             "resource_id": resource.get("resource_id", ""),
             "resource_name": name,
+            "region": resource.get("region", "global"),
             "resource_type": "aws_s3_bucket",
             "status": "FAIL",
             "severity": "HIGH",
@@ -148,6 +149,7 @@ def audit_security_group(resource: Dict[str, Any]) -> List[Dict[str, Any]]:
                 findings.append({
                     "resource_id": resource.get("resource_id", ""),
                     "resource_name": name,
+                    "region": resource.get("region", ""),
                     "resource_type": "aws_security_group",
                     "status": "FAIL",
                     "severity": "CRITICAL",
@@ -208,6 +210,7 @@ def audit_iam_policy(resource: Dict[str, Any]) -> List[Dict[str, Any]]:
         findings.append({
             "resource_id": resource.get("resource_id", ""),
             "resource_name": name,
+            "region": resource.get("region", "global"),
             "resource_type": "aws_iam_policy",
             "status": "FAIL",
             "severity": "CRITICAL",
@@ -273,6 +276,7 @@ def audit_iam_user(resource: Dict[str, Any]) -> List[Dict[str, Any]]:
         findings.append({
             "resource_id": resource.get("resource_id", ""),
             "resource_name": name,
+            "region": resource.get("region", "global"),
             "resource_type": "aws_iam_user",
             "status": "FAIL",
             "severity": "CRITICAL",
@@ -317,6 +321,243 @@ def audit_iam_user(resource: Dict[str, Any]) -> List[Dict[str, Any]]:
             "title": "IAM User Compliant",
             "description": f"User '{name}' has MFA enabled and access keys are current (< 90 days old).",
             "remediation_step": "No action needed.",
+        })
+
+    return findings
+
+
+# ── Audit EC2 Instance ─────────────────────────────────────────────
+
+def audit_ec2_instance(resource: Dict[str, Any]) -> List[Dict[str, Any]]:
+    findings = []
+    config = resource.get("config", {})
+    name = resource.get("resource_name", "")
+
+    # Check for IAM Instance Profile
+    if not config.get("iam_instance_profile"):
+        findings.append({
+            "resource_id": resource.get("resource_id", ""),
+            "resource_name": name,
+            "region": resource.get("region", ""),
+            "resource_type": "aws_ec2_instance",
+            "status": "FAIL",
+            "severity": "MEDIUM",
+            "check_id": "EC2.1",
+            "title": "EC2 instance should have an IAM Instance Profile",
+            "description": "EC2 instances should use IAM roles instead of hardcoded credentials.",
+            "reasoning": f"Instance {name} has no associated IAM instance profile.",
+            "expected": "IAM Instance Profile associated",
+            "actual": "None",
+            "remediation": f"Attach an IAM role to instance {name}.",
+        })
+
+    # Check for Public IP
+    if config.get("public_ip"):
+        findings.append({
+            "resource_id": resource.get("resource_id", ""),
+            "resource_name": name,
+            "region": resource.get("region", ""),
+            "resource_type": "aws_ec2_instance",
+            "status": "FAIL",
+            "severity": "HIGH",
+            "check_id": "EC2.2",
+            "title": "EC2 instance should not have a public IP address",
+            "description": "Public IP addresses increase the attack surface of the instance.",
+            "reasoning": f"Instance {name} has a public IP address: {config.get('public_ip')}",
+            "expected": "No Public IP address",
+            "actual": config.get("public_ip"),
+            "remediation": f"Remove the public IP from instance {name} if not absolutely necessary.",
+        })
+
+    if not findings:
+        findings.append({
+            "resource_id": resource.get("resource_id", ""),
+            "resource_name": name,
+            "region": resource.get("region", ""),
+            "resource_type": "aws_ec2_instance",
+            "status": "PASS",
+            "severity": "NONE",
+            "check_id": "EC2.0",
+            "title": "EC2 instance compliance check",
+            "description": "Instance follows basic security best practices.",
+        })
+    return findings
+
+# ── Audit VPC ───────────────────────────────────────────────────
+
+def audit_vpc(resource: Dict[str, Any]) -> List[Dict[str, Any]]:
+    findings = []
+    config = resource.get("config", {})
+    name = resource.get("resource_name", "")
+
+    # Check if it's a default VPC
+    if config.get("is_default"):
+        findings.append({
+            "resource_id": resource.get("resource_id", ""),
+            "resource_name": name,
+            "region": resource.get("region", ""),
+            "resource_type": "aws_vpc",
+            "status": "FAIL",
+            "severity": "LOW",
+            "check_id": "VPC.1",
+            "title": "Avoid using the default VPC",
+            "description": "Standard practice is to create custom VPCs for better isolation.",
+            "reasoning": f"VPC {name} is the default VPC.",
+            "expected": "Custom VPC",
+            "actual": "Default VPC",
+            "remediation": f"Use a custom VPC instead of the default {name}.",
+        })
+
+    if not findings:
+        findings.append({
+            "resource_id": resource.get("resource_id", ""),
+            "resource_name": name,
+            "region": resource.get("region", ""),
+            "resource_type": "aws_vpc",
+            "status": "PASS",
+            "severity": "NONE",
+            "check_id": "VPC.0",
+            "title": "VPC compliance check",
+            "description": "VPC follows basic security best practices.",
+        })
+    return findings
+
+# ── Audit RDS ───────────────────────────────────────────────────
+
+def audit_rds_instance(resource: Dict[str, Any]) -> List[Dict[str, Any]]:
+    findings = []
+    config = resource.get("config", {})
+    name = resource.get("resource_name", "")
+
+    # Check Public Accessibility
+    if config.get("publicly_accessible"):
+        findings.append({
+            "resource_id": resource.get("resource_id", ""),
+            "resource_name": name,
+            "region": resource.get("region", ""),
+            "resource_type": "aws_rds_instance",
+            "status": "FAIL",
+            "severity": "CRITICAL",
+            "check_id": "RDS.1",
+            "title": "RDS instance should not be publicly accessible",
+            "description": "Databases should be kept in private subnets.",
+            "reasoning": f"RDS {name} is publicly accessible.",
+            "expected": "PubliclyAccessible=False",
+            "actual": "PubliclyAccessible=True",
+            "remediation": f"Modify RDS {name} to set PubliclyAccessible=False.",
+        })
+
+    # Check Encryption
+    if not config.get("storage_encrypted"):
+        findings.append({
+            "resource_id": resource.get("resource_id", ""),
+            "resource_name": name,
+            "region": resource.get("region", ""),
+            "resource_type": "aws_rds_instance",
+            "status": "FAIL",
+            "severity": "HIGH",
+            "check_id": "RDS.2",
+            "title": "RDS instance should have storage encryption enabled",
+            "description": "Encrypting data at rest protects against unauthorized hardware access.",
+            "reasoning": f"RDS {name} storage is not encrypted.",
+            "expected": "StorageEncrypted=True",
+            "actual": "StorageEncrypted=False",
+            "remediation": f"Enable encryption for RDS {name}.",
+        })
+
+    if not findings:
+        findings.append({
+            "resource_id": resource.get("resource_id", ""),
+            "resource_name": name,
+            "region": resource.get("region", ""),
+            "resource_type": "aws_rds_instance",
+            "status": "PASS",
+            "severity": "NONE",
+            "check_id": "RDS.0",
+            "title": "RDS compliance check",
+            "description": "RDS follows basic security best practices.",
+        })
+    return findings
+
+# ── Audit Lambda ──────────────────────────────────────────────────
+
+def audit_lambda_function(resource: Dict[str, Any]) -> List[Dict[str, Any]]:
+    findings = []
+    config = resource.get("config", {})
+    name = resource.get("resource_name", "")
+
+    # Check for outdated runtimes
+    outdated_runtimes = ["python2.7", "python3.6", "python3.7", "nodejs10.x", "nodejs12.x"]
+    if config.get("runtime") in outdated_runtimes:
+        findings.append({
+            "resource_id": resource.get("resource_id", ""),
+            "resource_name": name,
+            "region": resource.get("region", ""),
+            "resource_type": "aws_lambda_function",
+            "status": "FAIL",
+            "severity": "MEDIUM",
+            "check_id": "LAM.1",
+            "title": "Lambda function runtime should be supported",
+            "description": "Outdated runtimes may have security vulnerabilities and no support.",
+            "reasoning": f"Lambda {name} uses an outdated runtime: {config.get('runtime')}",
+            "expected": "Latest supported runtime",
+            "actual": config.get("runtime"),
+            "remediation": f"Update Lambda {name} runtime to a newer version.",
+        })
+
+    if not findings:
+        findings.append({
+            "resource_id": resource.get("resource_id", ""),
+            "resource_name": name,
+            "region": resource.get("region", ""),
+            "resource_type": "aws_lambda_function",
+            "status": "PASS",
+            "severity": "NONE",
+            "check_id": "LAM.0",
+            "title": "Lambda compliance check",
+            "description": "Lambda follows basic security best practices.",
+        })
+    return findings
+
+
+def audit_generic_resource(resource: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Generic audit for resources not handled by specific CIS rules."""
+    findings = []
+    config = resource.get("config", {})
+    name = resource.get("resource_name", "unknown")
+    rtype = resource.get("resource_type", "aws_resource")
+    tags = config.get("tags", {})
+
+    # Check for mandatory tagging (Best Practice)
+    if not tags:
+        findings.append({
+            "resource_id": resource.get("resource_id", ""),
+            "resource_name": name,
+            "region": resource.get("region", "global"),
+            "resource_type": rtype,
+            "status": "WARN",
+            "severity": "LOW",
+            "check_id": "GEN.1",
+            "title": "Resource Missing Tags",
+            "description": f"Resource '{name}' has no tags. Tagging is essential for cost allocation and security ownership.",
+            "reasoning": f"Resource discovery found that '{name}' ({rtype}) has an empty tag set. CIS best practices recommend tagging all resources with at least Owner and Environment tags.",
+            "expected": "At least one tag (e.g., Owner, Environment, Project)",
+            "actual": "No tags found",
+            "recommendation": "Add descriptive tags to this resource to improve governance and auditability.",
+            "remediation_step": "Use AWS Console or Tagging API to add relevant tags to the resource.",
+        })
+
+    if not findings:
+        findings.append({
+            "resource_id": resource.get("resource_id", ""),
+            "resource_name": name,
+            "region": resource.get("region", "global"),
+            "resource_type": rtype,
+            "status": "PASS",
+            "severity": "NONE",
+            "check_id": "GEN.0",
+            "title": "Generic Resource Check",
+            "description": f"Resource '{name}' has basic metadata/tagging and is accounted for in inventory.",
         })
 
     return findings
@@ -394,6 +635,10 @@ def audit_live_resources(scan_data: Dict[str, Any]) -> Dict[str, Any]:
         "aws_security_group": audit_security_group,
         "aws_iam_policy": audit_iam_policy,
         "aws_iam_user": audit_iam_user,
+        "aws_ec2_instance": audit_ec2_instance,
+        "aws_vpc": audit_vpc,
+        "aws_rds_instance": audit_rds_instance,
+        "aws_lambda_function": audit_lambda_function,
     }
 
     # Audit each resource
@@ -402,10 +647,15 @@ def audit_live_resources(scan_data: Dict[str, Any]) -> Dict[str, Any]:
             continue
         rtype = resource.get("resource_type", "")
         audit_fn = audit_functions.get(rtype)
+        
         if audit_fn:
             resource_findings = audit_fn(resource)
-            results["findings"].extend(resource_findings)
-            results["summary"]["total_resources"] += 1
+        else:
+            # Fallback to generic auditor for unknown types
+            resource_findings = audit_generic_resource(resource)
+            
+        results["findings"].extend(resource_findings)
+        results["summary"]["total_resources"] += 1
 
     # Analyze CloudTrail events
     for event in scan_data.get("events", []):
@@ -424,19 +674,21 @@ def audit_live_resources(scan_data: Dict[str, Any]) -> Dict[str, Any]:
             if sev in results["summary"]:
                 results["summary"][sev] += 1
 
-    results["total_checks"] = len(results["findings"])
+    total_checks = len(results["findings"])
+    results["total_checks"] = total_checks
     results["passed"] = results["summary"]["passing"]
     results["failed"] = results["summary"]["failing"]
 
-    # Calculate health score
-    total = results["summary"]["total_resources"]
-    if total > 0:
+    # Calculate health score — based on findings, not resource count, for consistency
+    if total_checks > 0:
         severity_weights = {"critical": 15, "high": 8, "medium": 3, "low": 1}
+        # Only FAIL findings with known severity incur penalty
         total_penalty = sum(
             results["summary"].get(sev, 0) * weight
             for sev, weight in severity_weights.items()
         )
-        max_penalty = total * 15
+        # Max possible penalty: all checks are CRITICAL
+        max_penalty = total_checks * severity_weights["critical"]
         results["health_score"] = max(0, round(100 - (total_penalty / max_penalty * 100), 1))
 
     return results
