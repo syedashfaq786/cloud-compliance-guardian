@@ -194,16 +194,79 @@ const COMPLIANCE_RULES = [
   { id: "UEM-01", title: "Endpoint Devices Policy", severity: "MEDIUM", category: "Compute", provider: "All", framework: "CCM", description: "Establish an endpoint device management policy covering corporate-owned and BYOD devices that access cloud resources.", recommendation: "Enforce MDM/UEM (Intune, Jamf, Workspace ONE) for all devices. Require device compliance checks before granting cloud access.", docUrl: "https://cloudsecurityalliance.org/research/cloud-controls-matrix" },
   { id: "UEM-06", title: "Endpoint Security Baseline", severity: "HIGH", category: "Compute", provider: "All", framework: "CCM", description: "Define and enforce a security baseline for all endpoints including encryption, patch level, endpoint protection, and screen lock requirements.", recommendation: "Require BitLocker/FileVault encryption. Enforce OS patching within 30 days. Deploy EDR solution. Enforce auto-lock after 5 minutes.", docUrl: "https://cloudsecurityalliance.org/research/cloud-controls-matrix" },
   { id: "UEM-14", title: "Remote Work Policies", severity: "MEDIUM", category: "Networking", provider: "All", framework: "CCM", description: "Establish remote work policies governing the security of cloud access from remote locations including VPN requirements, home network security, and device controls.", recommendation: "Require VPN or Zero Trust Network Access (ZTNA) for all remote cloud access. Block split-tunneling. Enforce conditional access policies.", docUrl: "https://cloudsecurityalliance.org/research/cloud-controls-matrix" },
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // CIS Docker Benchmark v1.6.0 (2024)
+  // https://www.cisecurity.org/benchmark/docker
+  // ═══════════════════════════════════════════════════════════════════════
+
+  // Host Configuration
+  { id: "DKR 1.1", title: "Ensure a separate partition for containers has been created", severity: "HIGH", category: "Host Config", provider: "Docker", framework: "Docker", description: "All Docker containers and their data are stored under /var/lib/docker. This directory might fill up fast, making the host and Docker unusable. Create a separate partition for Docker.", recommendation: "Create a separate partition or volume for /var/lib/docker. Use --data-root flag to configure custom Docker root directory on dedicated storage.", docUrl: "https://docs.docker.com/engine/reference/commandline/dockerd/#daemon-data-directory" },
+  { id: "DKR 1.2", title: "Ensure Docker is kept up to date", severity: "HIGH", category: "Host Config", provider: "Docker", framework: "Docker", description: "Running outdated Docker versions exposes the host to known vulnerabilities. Keep Docker Engine updated to the latest stable release.", recommendation: "Update Docker Engine to the latest stable version. Subscribe to Docker security advisories. Test updates in staging before production.", docUrl: "https://docs.docker.com/engine/install/" },
+
+  // Docker Daemon
+  { id: "DKR 2.1", title: "Ensure network traffic is restricted between containers", severity: "HIGH", category: "Network", provider: "Docker", framework: "Docker", description: "By default, unrestricted network traffic is enabled between all containers on the same host. Restrict inter-container communication.", recommendation: "Set --icc=false on Docker daemon or use docker network create with --internal flag. Use user-defined bridge networks with explicit links.", docUrl: "https://docs.docker.com/network/drivers/bridge/#manage-a-user-defined-bridge" },
+  { id: "DKR 2.2", title: "Ensure the logging level is set to 'info'", severity: "MEDIUM", category: "Logging", provider: "Docker", framework: "Docker", description: "Setting the log level to info ensures appropriate information is captured for troubleshooting and security monitoring.", recommendation: "Set --log-level=info in Docker daemon configuration (/etc/docker/daemon.json). Avoid debug level in production.", docUrl: "https://docs.docker.com/config/daemon/logs/" },
+  { id: "DKR 2.3", title: "Ensure Docker daemon audit logging is configured", severity: "HIGH", category: "Logging", provider: "Docker", framework: "Docker", description: "Audit all Docker daemon activities to track security-relevant events including container lifecycle, image operations, and configuration changes.", recommendation: "Add Docker daemon files and directories to auditd rules: -w /usr/bin/dockerd -k docker -w /var/lib/docker -k docker -w /etc/docker -k docker", docUrl: "https://docs.docker.com/engine/security/" },
+  { id: "DKR 2.5", title: "Ensure insecure registries are not used", severity: "CRITICAL", category: "Image Security", provider: "Docker", framework: "Docker", description: "Docker should not be configured to use insecure (HTTP) registries. All registry communications must use TLS encryption.", recommendation: "Remove any --insecure-registry flags from daemon configuration. Use only HTTPS registries. Configure private registries with valid TLS certificates.", docUrl: "https://docs.docker.com/registry/insecure/" },
+  { id: "DKR 2.6", title: "Ensure TLS authentication for Docker daemon is configured", severity: "CRITICAL", category: "Network", provider: "Docker", framework: "Docker", description: "Docker daemon should require TLS client authentication to prevent unauthorized access to the Docker API.", recommendation: "Configure --tlsverify, --tlscacert, --tlscert, and --tlskey flags on Docker daemon. Use mutual TLS authentication.", docUrl: "https://docs.docker.com/engine/security/protect-access/" },
+
+  // Docker Images
+  { id: "DKR 4.1", title: "Ensure a user for the container has been created", severity: "HIGH", category: "Image Security", provider: "Docker", framework: "Docker", description: "Containers should not run as root. Create a dedicated non-root user in Dockerfiles to reduce container breakout risk.", recommendation: "Add USER directive in Dockerfile after installing packages. Use 'USER appuser' with a specific UID/GID. Avoid running as root.", docUrl: "https://docs.docker.com/develop/develop-images/instructions/#user" },
+  { id: "DKR 4.2", title: "Ensure images are scanned for vulnerabilities", severity: "CRITICAL", category: "Image Security", provider: "Docker", framework: "Docker", description: "Container images should be scanned for known vulnerabilities before deployment. Use automated scanning in CI/CD pipelines.", recommendation: "Integrate Trivy, Snyk, or Docker Scout into CI/CD. Block deployment of images with Critical/High CVEs. Scan base images weekly.", docUrl: "https://docs.docker.com/scout/" },
+  { id: "DKR 4.3", title: "Ensure only trusted base images are used", severity: "HIGH", category: "Image Security", provider: "Docker", framework: "Docker", description: "Use only official or verified base images from trusted registries. Avoid using unknown or community images without verification.", recommendation: "Use Docker Official Images or Verified Publisher images. Pin images to specific SHA256 digests. Maintain a curated list of approved base images.", docUrl: "https://docs.docker.com/trusted-content/official-images/" },
+  { id: "DKR 4.6", title: "Ensure HEALTHCHECK instructions are added", severity: "MEDIUM", category: "Runtime", provider: "Docker", framework: "Docker", description: "Add HEALTHCHECK instruction to Dockerfiles to enable container health monitoring and automatic restart of unhealthy containers.", recommendation: "Add HEALTHCHECK --interval=30s --timeout=10s --retries=3 CMD [command] to Dockerfile. Use appropriate health check endpoints.", docUrl: "https://docs.docker.com/reference/dockerfile/#healthcheck" },
+
+  // Container Runtime
+  { id: "DKR 5.1", title: "Ensure privileged containers are not used", severity: "CRITICAL", category: "Runtime", provider: "Docker", framework: "Docker", description: "Privileged containers have full access to the host's devices and kernel capabilities. Never use --privileged flag in production.", recommendation: "Remove --privileged flag. Use --cap-add to grant only specific capabilities needed. Use --security-opt for fine-grained security.", docUrl: "https://docs.docker.com/engine/reference/run/#runtime-privilege-and-linux-capabilities" },
+  { id: "DKR 5.2", title: "Ensure sensitive host directories are not mounted", severity: "CRITICAL", category: "Runtime", provider: "Docker", framework: "Docker", description: "Sensitive host directories (/, /boot, /dev, /etc, /lib, /proc, /sys, /usr) should not be mounted into containers.", recommendation: "Audit volume mounts with 'docker inspect'. Remove mounts to sensitive host paths. Use named volumes or tmpfs for temporary data.", docUrl: "https://docs.docker.com/storage/volumes/" },
+  { id: "DKR 5.4", title: "Ensure container resource limits (CPU/memory) are set", severity: "HIGH", category: "Runtime", provider: "Docker", framework: "Docker", description: "Containers without resource limits can consume all host resources, causing denial of service. Set CPU and memory limits.", recommendation: "Use --memory, --memory-swap, --cpus flags. In Docker Compose: deploy.resources.limits. Set both memory and CPU limits for every container.", docUrl: "https://docs.docker.com/config/containers/resource_constraints/" },
+  { id: "DKR 5.10", title: "Ensure secrets are not stored in Dockerfiles or images", severity: "CRITICAL", category: "Image Security", provider: "Docker", framework: "Docker", description: "Secrets (passwords, API keys, tokens) must never be hardcoded in Dockerfiles or baked into images. Use runtime secret injection.", recommendation: "Use Docker secrets, environment variables from vault, or mount secrets at runtime. Use multi-stage builds. Scan images with tools like truffleHog.", docUrl: "https://docs.docker.com/engine/swarm/secrets/" },
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // CIS Kubernetes Benchmark v1.8.0 (2024)
+  // https://www.cisecurity.org/benchmark/kubernetes
+  // ═══════════════════════════════════════════════════════════════════════
+
+  // Control Plane
+  { id: "K8S 1.1", title: "Ensure API server --anonymous-auth is set to false", severity: "CRITICAL", category: "API Server", provider: "K8s", framework: "K8s", description: "Anonymous authentication allows unauthenticated requests to the API server. Disable it to enforce authentication for all requests.", recommendation: "Set --anonymous-auth=false on kube-apiserver. Ensure all API requests require valid authentication credentials.", docUrl: "https://kubernetes.io/docs/reference/access-authn-authz/authentication/" },
+  { id: "K8S 1.2", title: "Ensure API server --authorization-mode is not set to AlwaysAllow", severity: "CRITICAL", category: "API Server", provider: "K8s", framework: "K8s", description: "AlwaysAllow authorization mode grants all requests without any authorization check. Use RBAC or Node authorization.", recommendation: "Set --authorization-mode=RBAC,Node on kube-apiserver. Never use AlwaysAllow in production clusters.", docUrl: "https://kubernetes.io/docs/reference/access-authn-authz/authorization/" },
+  { id: "K8S 1.3", title: "Ensure API server --audit-log-path is configured", severity: "HIGH", category: "API Server", provider: "K8s", framework: "K8s", description: "Kubernetes API server audit logging records all requests for security monitoring, compliance, and incident investigation.", recommendation: "Set --audit-log-path=/var/log/kubernetes/audit.log --audit-policy-file=/etc/kubernetes/audit-policy.yaml with appropriate retention.", docUrl: "https://kubernetes.io/docs/tasks/debug/debug-cluster/audit/" },
+  { id: "K8S 1.4", title: "Ensure API server uses TLS certificates", severity: "CRITICAL", category: "API Server", provider: "K8s", framework: "K8s", description: "The API server must use TLS for all communications. Ensure --tls-cert-file and --tls-private-key-file are configured.", recommendation: "Configure --tls-cert-file and --tls-private-key-file with valid certificates. Rotate certificates before expiry. Use cert-manager for automation.", docUrl: "https://kubernetes.io/docs/tasks/tls/managing-tls-in-a-cluster/" },
+
+  // RBAC & Auth
+  { id: "K8S 3.1", title: "Ensure RBAC is enabled and properly configured", severity: "CRITICAL", category: "RBAC", provider: "K8s", framework: "K8s", description: "Role-Based Access Control (RBAC) must be enabled to enforce least-privilege access. Default service accounts should have minimal permissions.", recommendation: "Set --authorization-mode=RBAC. Create specific Roles/ClusterRoles with minimal permissions. Avoid cluster-admin for workloads.", docUrl: "https://kubernetes.io/docs/reference/access-authn-authz/rbac/" },
+  { id: "K8S 3.2", title: "Ensure default service account is not used", severity: "HIGH", category: "RBAC", provider: "K8s", framework: "K8s", description: "Pods should not use the default service account. Create dedicated service accounts with minimal RBAC permissions for each workload.", recommendation: "Set automountServiceAccountToken: false on default SA. Create per-workload service accounts. Bind only required roles.", docUrl: "https://kubernetes.io/docs/tasks/configure-pod-container/configure-service-account/" },
+
+  // Pod Security
+  { id: "K8S 4.1", title: "Ensure pods do not run as root", severity: "CRITICAL", category: "Pod Security", provider: "K8s", framework: "K8s", description: "Containers running as root inside pods can escalate privileges to the node. Enforce non-root execution via security contexts.", recommendation: "Set securityContext.runAsNonRoot: true and runAsUser: 1000 on pod specs. Use Pod Security Standards (Restricted profile).", docUrl: "https://kubernetes.io/docs/concepts/security/pod-security-standards/" },
+  { id: "K8S 4.2", title: "Ensure pods do not allow privilege escalation", severity: "CRITICAL", category: "Pod Security", provider: "K8s", framework: "K8s", description: "allowPrivilegeEscalation enables a process to gain more privileges than its parent. Disable it on all containers.", recommendation: "Set securityContext.allowPrivilegeEscalation: false on all containers. Enforce via Pod Security Admission (Restricted).", docUrl: "https://kubernetes.io/docs/concepts/security/pod-security-standards/" },
+  { id: "K8S 4.3", title: "Ensure pods drop all capabilities and add only required ones", severity: "HIGH", category: "Pod Security", provider: "K8s", framework: "K8s", description: "Linux capabilities give granular root permissions. Containers should drop ALL capabilities and add back only what is explicitly needed.", recommendation: "Set securityContext.capabilities: { drop: ['ALL'], add: ['NET_BIND_SERVICE'] } — only add what is explicitly required.", docUrl: "https://kubernetes.io/docs/tasks/configure-pod-container/security-context/#set-capabilities-for-a-container" },
+  { id: "K8S 4.4", title: "Ensure read-only root filesystem is enabled", severity: "MEDIUM", category: "Pod Security", provider: "K8s", framework: "K8s", description: "A read-only root filesystem prevents writes to the container filesystem, limiting attacker capability after compromise.", recommendation: "Set securityContext.readOnlyRootFilesystem: true. Use emptyDir volumes for temporary writable directories like /tmp.", docUrl: "https://kubernetes.io/docs/concepts/security/pod-security-standards/" },
+
+  // Network & Secrets
+  { id: "K8S 5.1", title: "Ensure NetworkPolicies are defined for all namespaces", severity: "HIGH", category: "Network", provider: "K8s", framework: "K8s", description: "By default, all pods can communicate with all other pods. NetworkPolicies enforce micro-segmentation and zero-trust networking.", recommendation: "Create default-deny NetworkPolicies per namespace. Then allow only required ingress/egress traffic explicitly.", docUrl: "https://kubernetes.io/docs/concepts/services-networking/network-policies/" },
+  { id: "K8S 5.2", title: "Ensure Kubernetes Secrets are encrypted at rest", severity: "CRITICAL", category: "Secrets", provider: "K8s", framework: "K8s", description: "Kubernetes Secrets are stored in etcd in base64 encoding by default, which is NOT encryption. Enable encryption at rest.", recommendation: "Configure EncryptionConfiguration with aescbc or kms provider. Use external secret stores (Vault, AWS Secrets Manager) for production.", docUrl: "https://kubernetes.io/docs/tasks/administer-cluster/encrypt-data/" },
+  { id: "K8S 5.3", title: "Ensure Secrets are not used as environment variables", severity: "HIGH", category: "Secrets", provider: "K8s", framework: "K8s", description: "Secrets exposed as environment variables can leak via logs, crash dumps, or child processes. Mount secrets as volumes instead.", recommendation: "Use volume mounts to project secrets as files. Avoid envFrom with secretRef. Use external secret operators (ESO, Vault) for rotation.", docUrl: "https://kubernetes.io/docs/concepts/configuration/secret/#using-secrets" },
+
+  // Resource Management
+  { id: "K8S 6.1", title: "Ensure resource requests and limits are set for all pods", severity: "HIGH", category: "Resources", provider: "K8s", framework: "K8s", description: "Pods without resource requests/limits can consume all node resources, causing evictions and instability. Always set both.", recommendation: "Set resources.requests and resources.limits for CPU and memory on every container. Use LimitRanges as namespace-level defaults.", docUrl: "https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/" },
+  { id: "K8S 6.2", title: "Ensure namespaces have ResourceQuotas defined", severity: "MEDIUM", category: "Resources", provider: "K8s", framework: "K8s", description: "ResourceQuotas prevent a single namespace from consuming excessive cluster resources. Define quotas for all non-system namespaces.", recommendation: "Create ResourceQuota objects defining limits for pods, services, CPU, memory, and storage per namespace.", docUrl: "https://kubernetes.io/docs/concepts/policy/resource-quotas/" },
 ];
 
-const FRAMEWORKS = ["All", "CIS", "NIST", "CCM"];
-const CATEGORIES = ["All", ...Array.from(new Set(COMPLIANCE_RULES.map((r) => r.category))).sort()];
+const CLOUD_RULES = COMPLIANCE_RULES.filter(r => ["CIS", "NIST", "CCM"].includes(r.framework));
+const CONTAINER_RULES = COMPLIANCE_RULES.filter(r => ["Docker", "K8s"].includes(r.framework));
+
+const CLOUD_FRAMEWORKS = ["All", "CIS", "NIST", "CCM"];
+const CONTAINER_FRAMEWORKS = ["All", "Docker", "K8s"];
 const SEVERITIES = ["All", "CRITICAL", "HIGH", "MEDIUM", "LOW"];
 
 const PROVIDER_COLORS = {
   AWS: { bg: "rgba(255,153,0,0.08)", color: "#ff9900", border: "rgba(255,153,0,0.2)" },
   Azure: { bg: "rgba(0,120,212,0.08)", color: "#0078d4", border: "rgba(0,120,212,0.2)" },
   GCP: { bg: "rgba(66,133,244,0.08)", color: "#4285f4", border: "rgba(66,133,244,0.2)" },
+  Docker: { bg: "rgba(13,183,237,0.08)", color: "#0db7ed", border: "rgba(13,183,237,0.2)" },
+  "K8s": { bg: "rgba(50,109,230,0.08)", color: "#326de6", border: "rgba(50,109,230,0.2)" },
   All: { bg: "rgba(139,92,246,0.08)", color: "#8b5cf6", border: "rgba(139,92,246,0.2)" },
 };
 
@@ -211,64 +274,125 @@ const FRAMEWORK_COLORS = {
   CIS: { bg: "rgba(34,197,94,0.08)", color: "#16a34a", border: "rgba(34,197,94,0.2)" },
   NIST: { bg: "rgba(59,130,246,0.08)", color: "#2563eb", border: "rgba(59,130,246,0.2)" },
   CCM: { bg: "rgba(234,88,12,0.08)", color: "#ea580c", border: "rgba(234,88,12,0.2)" },
+  Docker: { bg: "rgba(13,183,237,0.08)", color: "#0db7ed", border: "rgba(13,183,237,0.2)" },
+  "K8s": { bg: "rgba(50,109,230,0.08)", color: "#326de6", border: "rgba(50,109,230,0.2)" },
 };
 
+/* ── Reusable Rule Card ─────────────────────────────────────────────── */
+function RuleCard({ rule, isExpanded, onToggle }) {
+  const pc = PROVIDER_COLORS[rule.provider] || PROVIDER_COLORS.All;
+  const fc = FRAMEWORK_COLORS[rule.framework] || FRAMEWORK_COLORS.CIS;
+  return (
+    <div className="glass-card rule-card" onClick={onToggle} style={{ cursor: "pointer" }}>
+      <div className="card-body">
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+            <a href={rule.docUrl} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}
+              className="rule-id" style={{ fontSize: 13, textDecoration: "none", color: "var(--accent-primary)", borderBottom: "1px dashed var(--accent-primary)" }}
+            >{rule.id}</a>
+            <span style={{ fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 99, background: fc.bg, color: fc.color, border: `1px solid ${fc.border}`, textTransform: "uppercase", letterSpacing: 0.5 }}>{rule.framework}</span>
+            <span style={{ fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 99, background: pc.bg, color: pc.color, border: `1px solid ${pc.border}` }}>
+              {rule.provider === "All" ? "All Clouds" : rule.provider}
+            </span>
+          </div>
+          <span className={`severity-badge ${rule.severity.toLowerCase()}`}>{rule.severity}</span>
+        </div>
+        <h4 style={{ fontSize: 14, fontWeight: 600, marginBottom: 8, lineHeight: 1.4 }}>{rule.title}</h4>
+        <p style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.5, marginBottom: 10 }}>{rule.description}</p>
+        {isExpanded && (
+          <div className="animate-fade-in" style={{ marginTop: 12 }}>
+            <div style={{ padding: "12px 14px", background: "rgba(255,122,0,0.04)", borderRadius: 10, border: "1px solid rgba(255,122,0,0.1)", marginBottom: 10 }}>
+              <p style={{ fontSize: 11, fontWeight: 700, color: "var(--accent-amber)", marginBottom: 4 }}>
+                <Icon name="circle-check" size={12} style={{ marginRight: 4 }} /> Recommendation
+              </p>
+              <p style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.6 }}>{rule.recommendation}</p>
+            </div>
+            {rule.docUrl && (
+              <a href={rule.docUrl} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}
+                style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, color: "var(--accent-primary)", textDecoration: "none", padding: "6px 12px", borderRadius: 6, background: "rgba(255,122,0,0.06)", border: "1px solid rgba(255,122,0,0.15)", transition: "all 0.2s" }}
+                onMouseEnter={(e) => e.target.style.background = "rgba(255,122,0,0.12)"}
+                onMouseLeave={(e) => e.target.style.background = "rgba(255,122,0,0.06)"}
+              >
+                <Icon name="arrow-up" size={12} style={{ transform: "rotate(45deg)" }} /> View Official Documentation
+              </a>
+            )}
+          </div>
+        )}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 10 }}>
+          <span className="category-tag">{rule.category}</span>
+          <span style={{ fontSize: 11, color: "var(--text-muted)" }}>{isExpanded ? "Click to collapse" : "Click for details"}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function CISRulesView() {
-  const [searchQuery, setSearchQuery] = useState("");
-  const [categoryFilter, setCategoryFilter] = useState("All");
-  const [severityFilter, setSeverityFilter] = useState("All");
-  const [frameworkFilter, setFrameworkFilter] = useState("All");
+  // Cloud section state
+  const [cloudSearch, setCloudSearch] = useState("");
+  const [cloudCategory, setCloudCategory] = useState("All");
+  const [cloudSeverity, setCloudSeverity] = useState("All");
+  const [cloudFramework, setCloudFramework] = useState("All");
   const [expandedRule, setExpandedRule] = useState(null);
 
-  const filtered = COMPLIANCE_RULES.filter((r) => {
-    const q = searchQuery.toLowerCase();
-    const matchesSearch = !searchQuery ||
-      r.title.toLowerCase().includes(q) ||
-      r.id.toLowerCase().includes(q) ||
-      r.description.toLowerCase().includes(q) ||
-      r.category.toLowerCase().includes(q) ||
-      r.provider.toLowerCase().includes(q) ||
-      r.framework.toLowerCase().includes(q) ||
-      r.recommendation.toLowerCase().includes(q);
-    const matchesCategory = categoryFilter === "All" || r.category === categoryFilter;
-    const matchesSeverity = severityFilter === "All" || r.severity === severityFilter;
-    const matchesFramework = frameworkFilter === "All" || r.framework === frameworkFilter;
-    return matchesSearch && matchesCategory && matchesSeverity && matchesFramework;
+  // Container section state
+  const [containerSearch, setContainerSearch] = useState("");
+  const [containerCategory, setContainerCategory] = useState("All");
+  const [containerSeverity, setContainerSeverity] = useState("All");
+  const [containerFramework, setContainerFramework] = useState("All");
+
+  const cloudCategories = ["All", ...Array.from(new Set(CLOUD_RULES.map((r) => r.category))).sort()];
+  const containerCategories = ["All", ...Array.from(new Set(CONTAINER_RULES.map((r) => r.category))).sort()];
+
+  // Cloud filtering
+  const filteredCloud = CLOUD_RULES.filter((r) => {
+    const q = cloudSearch.toLowerCase();
+    const matchesSearch = !cloudSearch || r.title.toLowerCase().includes(q) || r.id.toLowerCase().includes(q) || r.description.toLowerCase().includes(q) || r.category.toLowerCase().includes(q) || r.recommendation.toLowerCase().includes(q);
+    return matchesSearch && (cloudCategory === "All" || r.category === cloudCategory) && (cloudSeverity === "All" || r.severity === cloudSeverity) && (cloudFramework === "All" || r.framework === cloudFramework);
   });
 
-  const frameworkCounts = {
-    All: COMPLIANCE_RULES.length,
-    CIS: COMPLIANCE_RULES.filter(r => r.framework === "CIS").length,
-    NIST: COMPLIANCE_RULES.filter(r => r.framework === "NIST").length,
-    CCM: COMPLIANCE_RULES.filter(r => r.framework === "CCM").length,
+  // Container filtering
+  const filteredContainer = CONTAINER_RULES.filter((r) => {
+    const q = containerSearch.toLowerCase();
+    const matchesSearch = !containerSearch || r.title.toLowerCase().includes(q) || r.id.toLowerCase().includes(q) || r.description.toLowerCase().includes(q) || r.category.toLowerCase().includes(q) || r.recommendation.toLowerCase().includes(q);
+    return matchesSearch && (containerCategory === "All" || r.category === containerCategory) && (containerSeverity === "All" || r.severity === containerSeverity) && (containerFramework === "All" || r.framework === containerFramework);
+  });
+
+  const cloudCounts = {
+    All: CLOUD_RULES.length,
+    CIS: CLOUD_RULES.filter(r => r.framework === "CIS").length,
+    NIST: CLOUD_RULES.filter(r => r.framework === "NIST").length,
+    CCM: CLOUD_RULES.filter(r => r.framework === "CCM").length,
+  };
+
+  const containerCounts = {
+    All: CONTAINER_RULES.length,
+    Docker: CONTAINER_RULES.filter(r => r.framework === "Docker").length,
+    "K8s": CONTAINER_RULES.filter(r => r.framework === "K8s").length,
   };
 
   return (
     <div>
+      {/* ═══════════════════════════════════════════════════════════════════
+           SECTION 1: CLOUD COMPLIANCE RULES 
+          ═══════════════════════════════════════════════════════════════════ */}
       <div className="page-header">
-        <h2>Compliance Rules</h2>
+        <h2>Cloud Compliance Rules</h2>
         <p>Reference catalog of CIS Benchmark, NIST 800-53, and CSA CCM v4.1 compliance controls — applicable across AWS, Azure, and GCP</p>
       </div>
 
-      {/* ── Framework Tabs ─────────────────────────────────────────── */}
+      {/* Cloud Framework Tabs */}
       <div style={{ display: "flex", gap: 10, marginBottom: 12, alignItems: "center", flexWrap: "wrap" }}>
-        {FRAMEWORKS.map((f) => (
-          <button
-            key={f}
-            className={`period-btn ${frameworkFilter === f ? "active" : ""}`}
-            onClick={() => setFrameworkFilter(f)}
-            style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 600 }}
-          >
+        {CLOUD_FRAMEWORKS.map((f) => (
+          <button key={f} className={`period-btn ${cloudFramework === f ? "active" : ""}`} onClick={() => setCloudFramework(f)}
+            style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 600 }}>
             {f === "CIS" && <Icon name="shield" size={14} />}
             {f === "NIST" && <Icon name="clipboard" size={14} />}
             {f === "CCM" && <Icon name="cloud-plus" size={14} />}
-            {f} <span style={{ opacity: 0.7, fontSize: 11 }}>({frameworkCounts[f]})</span>
+            {f} <span style={{ opacity: 0.7, fontSize: 11 }}>({cloudCounts[f]})</span>
           </button>
         ))}
-        <span style={{
-          marginLeft: "auto", fontSize: 12, color: "var(--text-muted)",
-          display: "flex", alignItems: "center", gap: 6,
-        }}>
+        <span style={{ marginLeft: "auto", fontSize: 12, color: "var(--text-muted)", display: "flex", alignItems: "center", gap: 6 }}>
           <img src="/logos/aws.svg" alt="AWS" style={{ width: 16, height: 16, opacity: 0.7 }} />
           <img src="/logos/azure.svg" alt="Azure" style={{ width: 16, height: 16, opacity: 0.7 }} />
           <img src="/logos/gcp.svg" alt="GCP" style={{ width: 16, height: 16, opacity: 0.7 }} />
@@ -276,134 +400,113 @@ export default function CISRulesView() {
         </span>
       </div>
 
-      {/* ── Search & Filters ───────────────────────────────────────── */}
+      {/* Cloud Search & Filters */}
       <div className="glass-card" style={{ marginBottom: 20 }}>
         <div className="card-body" style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
           <div className="input-wrapper" style={{ flex: 1, minWidth: 200 }}>
             <span className="input-icon"><Icon name="search" size={16} /></span>
-            <input
-              type="text"
-              placeholder="Search by rule ID, title, description, framework..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              style={{ width: "100%" }}
-            />
+            <input type="text" placeholder="Search cloud rules by ID, title, description..." value={cloudSearch} onChange={(e) => setCloudSearch(e.target.value)} style={{ width: "100%" }} />
           </div>
-          <select className="filter-select" value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}>
-            {CATEGORIES.map((c) => <option key={c} value={c}>{c === "All" ? "All Categories" : c}</option>)}
+          <select className="filter-select" value={cloudCategory} onChange={(e) => setCloudCategory(e.target.value)}>
+            {cloudCategories.map((c) => <option key={c} value={c}>{c === "All" ? "All Categories" : c}</option>)}
           </select>
-          <select className="filter-select" value={severityFilter} onChange={(e) => setSeverityFilter(e.target.value)}>
+          <select className="filter-select" value={cloudSeverity} onChange={(e) => setCloudSeverity(e.target.value)}>
             {SEVERITIES.map((s) => <option key={s} value={s}>{s === "All" ? "All Severities" : s}</option>)}
           </select>
-          {searchQuery && (
-            <button
-              onClick={() => setSearchQuery("")}
-              style={{
-                padding: "8px 14px", border: "1px solid var(--border-glass)", borderRadius: "var(--radius-sm)",
-                background: "var(--bg-card)", color: "var(--text-muted)", fontSize: 12, fontWeight: 600,
-                cursor: "pointer", fontFamily: "'Inter', sans-serif"
-              }}
-            >
-              Clear
-            </button>
+          {cloudSearch && (
+            <button onClick={() => setCloudSearch("")} style={{ padding: "8px 14px", border: "1px solid var(--border-glass)", borderRadius: "var(--radius-sm)", background: "var(--bg-card)", color: "var(--text-muted)", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "'Inter', sans-serif" }}>Clear</button>
           )}
         </div>
       </div>
 
-      {/* ── Results Count ──────────────────────────────────────────── */}
       <p style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: 16 }}>
-        Showing {filtered.length} of {COMPLIANCE_RULES.length} rules
-        {searchQuery && <> matching &quot;<strong style={{ color: "var(--text-primary)" }}>{searchQuery}</strong>&quot;</>}
+        Showing {filteredCloud.length} of {CLOUD_RULES.length} cloud rules
+        {cloudSearch && <> matching &quot;<strong style={{ color: "var(--text-primary)" }}>{cloudSearch}</strong>&quot;</>}
       </p>
 
-      {/* ── Rules Grid ─────────────────────────────────────────────── */}
       <div className="rules-grid">
-        {filtered.map((rule) => {
-          const pc = PROVIDER_COLORS[rule.provider] || PROVIDER_COLORS.All;
-          const fc = FRAMEWORK_COLORS[rule.framework] || FRAMEWORK_COLORS.CIS;
-          const isExpanded = expandedRule === rule.id;
-          return (
-            <div key={rule.id} className="glass-card rule-card" onClick={() => setExpandedRule(isExpanded ? null : rule.id)}
-              style={{ cursor: "pointer" }}>
-              <div className="card-body">
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                    <a
-                      href={rule.docUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      onClick={(e) => e.stopPropagation()}
-                      className="rule-id"
-                      style={{ fontSize: 13, textDecoration: "none", color: "var(--accent-primary)", borderBottom: "1px dashed var(--accent-primary)" }}
-                    >{rule.id}</a>
-                    <span style={{
-                      fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 99,
-                      background: fc.bg, color: fc.color, border: `1px solid ${fc.border}`,
-                      textTransform: "uppercase", letterSpacing: 0.5,
-                    }}>{rule.framework}</span>
-                    <span style={{
-                      fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 99,
-                      background: pc.bg, color: pc.color, border: `1px solid ${pc.border}`
-                    }}>
-                      {rule.provider === "All" ? "All Clouds" : rule.provider}
-                    </span>
-                  </div>
-                  <span className={`severity-badge ${rule.severity.toLowerCase()}`}>{rule.severity}</span>
-                </div>
-                <h4 style={{ fontSize: 14, fontWeight: 600, marginBottom: 8, lineHeight: 1.4 }}>{rule.title}</h4>
-                <p style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.5, marginBottom: 10 }}>{rule.description}</p>
-
-                {/* Expanded Recommendation + Link */}
-                {isExpanded && (
-                  <div className="animate-fade-in" style={{ marginTop: 12 }}>
-                    <div style={{ padding: "12px 14px", background: "rgba(255,122,0,0.04)", borderRadius: 10, border: "1px solid rgba(255,122,0,0.1)", marginBottom: 10 }}>
-                      <p style={{ fontSize: 11, fontWeight: 700, color: "var(--accent-amber)", marginBottom: 4 }}>
-                        <Icon name="circle-check" size={12} style={{ marginRight: 4 }} /> Recommendation
-                      </p>
-                      <p style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.6 }}>{rule.recommendation}</p>
-                    </div>
-                    {rule.docUrl && (
-                      <a
-                        href={rule.docUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        onClick={(e) => e.stopPropagation()}
-                        style={{
-                          display: "inline-flex", alignItems: "center", gap: 6,
-                          fontSize: 12, fontWeight: 600, color: "var(--accent-primary)",
-                          textDecoration: "none", padding: "6px 12px", borderRadius: 6,
-                          background: "rgba(255,122,0,0.06)", border: "1px solid rgba(255,122,0,0.15)",
-                          transition: "all 0.2s",
-                        }}
-                        onMouseEnter={(e) => e.target.style.background = "rgba(255,122,0,0.12)"}
-                        onMouseLeave={(e) => e.target.style.background = "rgba(255,122,0,0.06)"}
-                      >
-                        <Icon name="arrow-up" size={12} style={{ transform: "rotate(45deg)" }} />
-                        View Official Documentation
-                      </a>
-                    )}
-                  </div>
-                )}
-
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 10 }}>
-                  <span className="category-tag">{rule.category}</span>
-                  <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
-                    {isExpanded ? "Click to collapse" : "Click for details"}
-                  </span>
-                </div>
-              </div>
-            </div>
-          );
-        })}
+        {filteredCloud.map((rule) => (
+          <RuleCard key={rule.id} rule={rule} isExpanded={expandedRule === rule.id} onToggle={() => setExpandedRule(expandedRule === rule.id ? null : rule.id)} />
+        ))}
       </div>
 
-      {filtered.length === 0 && (
+      {filteredCloud.length === 0 && (
         <div className="glass-card" style={{ padding: 48, textAlign: "center" }}>
           <Icon name="search" size={40} style={{ color: "var(--text-muted)", marginBottom: 12 }} />
-          <h3 style={{ fontSize: 16, color: "var(--text-secondary)" }}>No rules match your filters</h3>
+          <h3 style={{ fontSize: 16, color: "var(--text-secondary)" }}>No cloud rules match your filters</h3>
           <p style={{ color: "var(--text-muted)", fontSize: 13 }}>Try adjusting your search or filter criteria.</p>
         </div>
       )}
+
+      {/* ═══════════════════════════════════════════════════════════════════
+           SECTION 2: CONTAINER COMPLIANCE RULES 
+          ═══════════════════════════════════════════════════════════════════ */}
+      <div style={{
+        marginTop: 48,
+        paddingTop: 32,
+        borderTop: "1px solid var(--border-glass)",
+      }}>
+        <div className="page-header">
+          <h2>Container Compliance Rules</h2>
+          <p>CIS Docker Benchmark v1.6.0 and CIS Kubernetes Benchmark v1.8.0 — security controls for containerized workloads</p>
+        </div>
+
+        {/* Container Framework Tabs */}
+        <div style={{ display: "flex", gap: 10, marginBottom: 12, alignItems: "center", flexWrap: "wrap" }}>
+          {CONTAINER_FRAMEWORKS.map((f) => (
+            <button key={f} className={`period-btn ${containerFramework === f ? "active" : ""}`} onClick={() => setContainerFramework(f)}
+              style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 600 }}>
+              {f === "Docker" && <img src="/logos/docker.svg" alt="Docker" style={{ width: 14, height: 14 }} />}
+              {f === "K8s" && <img src="/logos/kubernetes.svg" alt="K8s" style={{ width: 14, height: 14 }} />}
+              {f} <span style={{ opacity: 0.7, fontSize: 11 }}>({containerCounts[f]})</span>
+            </button>
+          ))}
+          <span style={{ marginLeft: "auto", fontSize: 12, color: "var(--text-muted)", display: "flex", alignItems: "center", gap: 6 }}>
+            <img src="/logos/docker.svg" alt="Docker" style={{ width: 16, height: 16, opacity: 0.7 }} />
+            <img src="/logos/kubernetes.svg" alt="K8s" style={{ width: 16, height: 16, opacity: 0.7 }} />
+            Controls apply to all container platforms
+          </span>
+        </div>
+
+        {/* Container Search & Filters */}
+        <div className="glass-card" style={{ marginBottom: 20 }}>
+          <div className="card-body" style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+            <div className="input-wrapper" style={{ flex: 1, minWidth: 200 }}>
+              <span className="input-icon"><Icon name="search" size={16} /></span>
+              <input type="text" placeholder="Search container rules by ID, title, description..." value={containerSearch} onChange={(e) => setContainerSearch(e.target.value)} style={{ width: "100%" }} />
+            </div>
+            <select className="filter-select" value={containerCategory} onChange={(e) => setContainerCategory(e.target.value)}>
+              {containerCategories.map((c) => <option key={c} value={c}>{c === "All" ? "All Categories" : c}</option>)}
+            </select>
+            <select className="filter-select" value={containerSeverity} onChange={(e) => setContainerSeverity(e.target.value)}>
+              {SEVERITIES.map((s) => <option key={s} value={s}>{s === "All" ? "All Severities" : s}</option>)}
+            </select>
+            {containerSearch && (
+              <button onClick={() => setContainerSearch("")} style={{ padding: "8px 14px", border: "1px solid var(--border-glass)", borderRadius: "var(--radius-sm)", background: "var(--bg-card)", color: "var(--text-muted)", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "'Inter', sans-serif" }}>Clear</button>
+            )}
+          </div>
+        </div>
+
+        <p style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: 16 }}>
+          Showing {filteredContainer.length} of {CONTAINER_RULES.length} container rules
+          {containerSearch && <> matching &quot;<strong style={{ color: "var(--text-primary)" }}>{containerSearch}</strong>&quot;</>}
+        </p>
+
+        <div className="rules-grid">
+          {filteredContainer.map((rule) => (
+            <RuleCard key={rule.id} rule={rule} isExpanded={expandedRule === rule.id} onToggle={() => setExpandedRule(expandedRule === rule.id ? null : rule.id)} />
+          ))}
+        </div>
+
+        {filteredContainer.length === 0 && (
+          <div className="glass-card" style={{ padding: 48, textAlign: "center" }}>
+            <Icon name="search" size={40} style={{ color: "var(--text-muted)", marginBottom: 12 }} />
+            <h3 style={{ fontSize: 16, color: "var(--text-secondary)" }}>No container rules match your filters</h3>
+            <p style={{ color: "var(--text-muted)", fontSize: 13 }}>Try adjusting your search or filter criteria.</p>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
+

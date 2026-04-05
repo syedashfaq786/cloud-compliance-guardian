@@ -113,7 +113,7 @@ manager = ConnectionManager()
 # ─── App Setup ────────────────────────────────────────────────────────────────
 
 app = FastAPI(
-    title="Cloud-Compliance Guardian API",
+    title="Invecto Compliance Guard API",
     description="CIS Benchmark compliance auditor powered by Cisco Sec-8B",
     version="1.0.0",
 )
@@ -910,7 +910,7 @@ def download_audit_report(
             fw_failed = fw_total - fw_passed
             fw_score = round((fw_passed / fw_total) * 100, 1) if fw_total > 0 else 0.0
             report = {
-                "report_title": f"Cloud Compliance Guardian — Audit Report{fw_label}",
+                "report_title": f"Invecto Compliance Guard — Audit Report{fw_label}",
                 "generated_at": datetime.now(timezone.utc).isoformat(),
                 "framework_filter": framework,
                 "audit": audit_data,
@@ -1234,6 +1234,97 @@ def _load_scan_cache(provider: str = "aws") -> dict:
     return {}
 
 
+def _persist_cloud_scan(
+    result: Dict[str, Any],
+    provider: str,
+    framework: str = "CIS",
+) -> Optional[str]:
+    """Persist a cloud monitoring scan result to audits/findings tables so it appears in audit history."""
+    try:
+        findings = (result.get("audit") or {}).get("findings") or []
+        resources = result.get("resources") or []
+        scan_summary = result.get("scan") or {}
+
+        failed_findings = [
+            f for f in findings
+            if str(f.get("status", "")).upper() in {"FAIL", "WARN"}
+        ]
+
+        sev_counts = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0}
+        for finding in failed_findings:
+            sev = str(finding.get("severity", "LOW")).upper()
+            if sev in sev_counts:
+                sev_counts[sev] += 1
+
+        mapped_findings = []
+        for finding in findings:
+            raw_status = str(finding.get("status", "FAIL")).upper()
+            db_status = "PASS" if raw_status == "PASS" else "FAIL"
+            mapped_findings.append({
+                "rule_id": finding.get("rule_id") or finding.get("cis_rule_id") or "",
+                "rule_title": finding.get("rule_title") or finding.get("title") or "Cloud Security Control",
+                "severity": finding.get("severity", "LOW"),
+                "resource_address": finding.get("resource_address") or finding.get("resource_name") or "",
+                "resource_type": finding.get("resource_type") or "",
+                "file_path": finding.get("file_path", ""),
+                "description": finding.get("description", ""),
+                "remediation_hcl": finding.get("remediation_hcl", ""),
+                "reasoning": finding.get("reasoning", ""),
+                "expected": finding.get("expected", ""),
+                "actual": finding.get("actual", ""),
+                "recommendation": finding.get("recommendation") or finding.get("remediation_step", ""),
+                "cloud_provider": finding.get("cloud_provider", provider.upper()),
+                "status": db_status,
+                "confidence": float(finding.get("confidence", 1.0) or 1.0),
+            })
+
+        health_score = (result.get("audit") or {}).get("health_score", 0.0) or 0.0
+        # Some auditors store summary differently
+        if health_score == 0.0:
+            summary_obj = (result.get("audit") or {}).get("summary") or {}
+            health_score = summary_obj.get("health_score", 0.0) or 0.0
+
+        provider_upper = provider.upper()
+        regions = result.get("regions_scanned") or []
+        scan_time = result.get("scan_time") or ""
+
+        audit_id = str(uuid.uuid4())[:12]
+        init_db()
+        session = get_session()
+        save_audit(session, {
+            "audit_id": audit_id,
+            "directory": f"{provider_upper} Live Scan",
+            "files_scanned": 0,
+            "resources_scanned": len(resources),
+            "total_findings": len(failed_findings),
+            "critical_count": sev_counts["CRITICAL"],
+            "high_count": sev_counts["HIGH"],
+            "medium_count": sev_counts["MEDIUM"],
+            "low_count": sev_counts["LOW"],
+            "compliance_score": float(health_score),
+            "status": "completed",
+            "triggered_by": "cloud_monitoring",
+            "metadata_json": {
+                "domain": "cloud",
+                "target": provider.lower(),
+                "framework": framework,
+                "mode": "live_scan",
+                "source": "monitoring",
+                "provider": provider_upper,
+                "scan_time": scan_time,
+                "regions_scanned": regions,
+                "total_resources": scan_summary.get("total_resources", len(resources)),
+            },
+            "findings": mapped_findings,
+        })
+        session.close()
+        logger.info("Persisted %s cloud scan as audit %s (%d findings)", provider_upper, audit_id, len(failed_findings))
+        return audit_id
+    except Exception as exc:
+        logger.exception("Failed to persist %s cloud scan audit: %s", provider, exc)
+        return None
+
+
 def _persist_container_audit(
     result: Dict[str, Any],
     framework: str,
@@ -1446,6 +1537,15 @@ def configure_aws(creds: AWSCredentialsRequest, background_tasks: BackgroundTask
     # Persist credentials to disk
     _save_aws_credentials(access_key, secret_key, region)
 
+    # Clear old scan cache on new connection
+    global _aws_scan_cache
+    _aws_scan_cache = {}
+    if _AWS_SCAN_CACHE_FILE.exists():
+        try:
+            _AWS_SCAN_CACHE_FILE.unlink()
+        except:
+            pass
+
     return {"status": "connected", **result}
 
 
@@ -1505,6 +1605,15 @@ def configure_azure(creds: AzureCredentialsRequest, background_tasks: Background
         "subscription_id": creds.subscription_id
     })
     
+    # Clear old scan cache on new connection
+    global _azure_scan_cache
+    _azure_scan_cache = None
+    if _AZURE_SCAN_CACHE_FILE.exists():
+        try:
+            _AZURE_SCAN_CACHE_FILE.unlink()
+        except:
+            pass
+    
     # Trigger discovery in background
     background_tasks.add_task(run_azure_scan)
     
@@ -1553,6 +1662,15 @@ def configure_gcp(creds: GCPCredentialsRequest, background_tasks: BackgroundTask
         "project_id": project_id,
         "service_account_json": service_account_json
     })
+    
+    # Clear old scan cache on new connection
+    global _gcp_scan_cache
+    _gcp_scan_cache = None
+    if _GCP_SCAN_CACHE_FILE.exists():
+        try:
+            _GCP_SCAN_CACHE_FILE.unlink()
+        except:
+            pass
     
     # Trigger discovery in background
     background_tasks.add_task(run_gcp_scan)
@@ -1622,6 +1740,9 @@ async def run_aws_scan(request: Optional[AWSScanRequest] = None):
 
     _aws_scan_cache = result
     _save_scan_cache(result, "aws")
+    
+    # Persist as audit record so it appears in Audit History
+    _persist_cloud_scan(result, provider="aws", framework=framework)
     
     # Broadcast to topology view
     await manager.broadcast({
@@ -1724,6 +1845,9 @@ async def run_azure_scan():
     _azure_scan_cache = result
     _save_scan_cache(result, "azure")
     
+    # Persist as audit record so it appears in Audit History
+    _persist_cloud_scan(result, provider="azure", framework="CIS")
+    
     await manager.broadcast({
         "type": "RESOURCE_UPDATED",
         "provider": "azure",
@@ -1768,6 +1892,9 @@ async def run_gcp_scan():
 
     _gcp_scan_cache = result
     _save_scan_cache(result, "gcp")
+    
+    # Persist as audit record so it appears in Audit History
+    _persist_cloud_scan(result, provider="gcp", framework="CIS")
     
     await manager.broadcast({
         "type": "RESOURCE_UPDATED",
@@ -1886,7 +2013,7 @@ def download_container_report(
         failed = total - passed
         score = round((passed / total) * 100, 1) if total > 0 else 0.0
         report = {
-            "report_title": f"Cloud Compliance Guardian — Container Security Audit{fw_label}",
+            "report_title": f"Invecto Compliance Guard — Container Security Audit{fw_label}",
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "framework_filter": framework,
             "scan_summary": scan_meta,
@@ -2334,7 +2461,7 @@ def download_aws_report(
 
     if format == "json":
         report = {
-            "report_title": f"Cloud Compliance Guardian — AWS Live Audit Report{fw_label}",
+            "report_title": f"Invecto Compliance Guard — AWS Live Audit Report{fw_label}",
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "framework_filter": framework,
             "region": region,

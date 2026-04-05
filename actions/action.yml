@@ -1,6 +1,6 @@
-name: "Cloud-Compliance Guardian"
+name: "Invecto Compliance Guard"
 description: "AI-powered Terraform CIS Benchmark auditor using Cisco Sec-8B"
-author: "Cloud-Compliance Guardian Team"
+author: "Invecto Compliance Guard Team"
 
 branding:
   icon: "shield"

@@ -29,8 +29,16 @@ export default function Sidebar({ activeTab = "dashboard", onTabChange }) {
   return (
     <aside className="sidebar">
       <div className="sidebar-logo">
-        <h1><Logo size={28} style={{ marginRight: 8, verticalAlign: "middle" }} /> Cloud Compliance Guardian</h1>
-        <span>CIS & NIST Compliance Monitor</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <div style={{ width: 42, height: 42, borderRadius: 12, background: "rgba(255,159,67,0.14)", border: "1px solid rgba(255,159,67,0.28)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, boxShadow: "0 0 16px rgba(255,159,67,0.12)" }}>
+            <Logo size={26} />
+          </div>
+          <div>
+            <div style={{ fontSize: 17, fontWeight: 900, color: "#fff", lineHeight: 1.15, letterSpacing: "-0.4px" }}>Invecto</div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: "rgba(255,159,67,0.9)", letterSpacing: "0.06em", textTransform: "uppercase", lineHeight: 1.3 }}>Compliance Guard</div>
+          </div>
+        </div>
+        <span style={{ marginTop: 10, display: "block" }}>AI-Powered Cloud Security</span>
       </div>
 
       <nav className="sidebar-nav">

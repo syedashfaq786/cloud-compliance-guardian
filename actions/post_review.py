@@ -49,7 +49,7 @@ def build_summary_comment(report: dict) -> str:
     else:
         grade = "🔴 F"
 
-    comment = f"""## ☁️ Cloud-Compliance Guardian Report
+    comment = f"""## ☁️ Invecto Compliance Guard Report
 
 ### Compliance Scorecard
 
@@ -96,7 +96,7 @@ def build_summary_comment(report: dict) -> str:
     else:
         comment += "### ✅ All Clear!\nNo CIS Benchmark violations detected. Great work! 🎉\n"
 
-    comment += "\n---\n_Powered by [Cloud-Compliance Guardian](https://github.com/cloud-compliance-guardian) using Cisco Sec-8B_"
+    comment += "\n---\n_Powered by [Invecto Compliance Guard](https://github.com/invecto-compliance-guard) using Cisco Sec-8B_"
     return comment
 
 
@@ -167,7 +167,7 @@ def post_review(repo: str, pr_number: int, comments: list, token: str):
         })
 
     payload = {
-        "body": "☁️ **Cloud-Compliance Guardian** found issues in this PR. See inline comments below.",
+        "body": "☁️ **Invecto Compliance Guard** found issues in this PR. See inline comments below.",
         "event": "COMMENT",
         "comments": review_comments,
     }

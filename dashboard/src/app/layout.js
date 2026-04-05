@@ -1,9 +1,9 @@
 import "./globals.css";
 
 export const metadata = {
-  title: "Cloud Compliance Guardian | Security Dashboard",
-  description: "AI-powered Terraform CIS Benchmark compliance monitoring dashboard — powered by Cisco Sec-8B",
-  keywords: ["terraform", "CIS", "compliance", "security", "dashboard", "cisco", "sec-8b"],
+  title: "Invecto Compliance Guard | Multi-Framework Security Dashboard",
+  description: "Enterprise compliance auditing platform — CIS Benchmarks, NIST 800-53, CSA CCM, container security (Docker/Kubernetes), and live cloud scanning for AWS, Azure & GCP. Powered by Cisco Sec-8B.",
+  keywords: ["CIS", "NIST", "CCM", "compliance", "cloud security", "container security", "docker", "kubernetes", "AWS", "Azure", "GCP", "terraform", "invecto", "cisco", "sec-8b"],
 };
 
 export default function RootLayout({ children }) {

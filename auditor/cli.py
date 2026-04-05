@@ -1,5 +1,5 @@
 """
-CLI Interface — Rich terminal output for the Cloud-Compliance Guardian auditor.
+CLI Interface — Rich terminal output for the Invecto Compliance Guard auditor.
 
 Usage:
     python -m auditor scan ./terraform-directory
@@ -42,7 +42,7 @@ SEVERITY_ICONS = {
 
 def _print_banner():
     banner = Text()
-    banner.append("☁️  Cloud-Compliance Guardian", style="bold cyan")
+    banner.append("☁️  Invecto Compliance Guard", style="bold cyan")
     banner.append("\n   CIS Benchmark Auditor powered by Cisco Sec-8B", style="dim")
     console.print(Panel(banner, border_style="cyan", padding=(1, 2)))
 
@@ -190,7 +190,7 @@ def cmd_scan(args):
 def main():
     parser = argparse.ArgumentParser(
         prog="auditor",
-        description="☁️  Cloud-Compliance Guardian — AI-powered Terraform CIS Benchmark auditor",
+        description="☁️  Invecto Compliance Guard — AI-powered Terraform CIS Benchmark auditor",
     )
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 

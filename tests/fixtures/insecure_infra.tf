@@ -1,5 +1,5 @@
 # ─── Intentionally insecure Terraform for testing ────────────────────────────
-# This file contains CIS Benchmark violations for Cloud-Compliance Guardian demo.
+# This file contains CIS Benchmark violations for Invecto Compliance Guard demo.
 
 provider "aws" {
   region = "us-east-1"

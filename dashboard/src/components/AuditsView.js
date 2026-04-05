@@ -13,6 +13,27 @@ const SEVERITY_META = {
 
 const PROVIDER_ICON = { "AWS": "aws", "Azure": "azure", "GCP": "gcp" };
 
+const getAuditSource = (audit) => {
+  if (!audit) return { label: "Scan", color: "var(--text-muted)", bg: "rgba(100,100,100,0.1)" };
+  const trigger = audit.triggered_by || "";
+  const meta = audit.metadata_json || {};
+  const domain = (typeof meta === "object" ? meta.domain : "") || "";
+  const provider = (typeof meta === "object" ? meta.provider : "") || "";
+  
+  if (trigger === "cloud_monitoring" || domain === "cloud") {
+    const p = provider || "Cloud";
+    return { label: `${p} Monitoring`, color: "#3b82f6", bg: "rgba(59,130,246,0.1)", icon: PROVIDER_ICON[p] || "cloud" };
+  }
+  if (domain === "container") {
+    const target = (typeof meta === "object" ? meta.target : "") || "container";
+    return { label: target === "kubernetes" ? "K8s Scan" : "Docker Scan", color: "#06b6d4", bg: "rgba(6,182,212,0.1)", icon: "shield" };
+  }
+  if (trigger === "github_sync" || trigger === "github") {
+    return { label: "GitHub Sync", color: "#a78bfa", bg: "rgba(167,139,250,0.1)", icon: "shield" };
+  }
+  return { label: "Terraform Scan", color: "var(--accent-primary)", bg: "rgba(255,159,67,0.1)", icon: "folder" };
+};
+
 const getAuditFramework = (audit) => {
   if (!audit) return "CIS";
   const meta = audit.metadata_json;
@@ -206,9 +227,22 @@ export default function AuditsView() {
 
               {/* Info */}
               <div style={{ flex: 1, minWidth: 240 }}>
-                <h2 style={{ fontSize: 20, fontWeight: 800, marginBottom: 4 }}>
-                  Audit Report
-                </h2>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
+                   <h2 style={{ fontSize: 20, fontWeight: 800 }}>Audit Report</h2>
+                   {(() => {
+                     const src = getAuditSource(selectedAudit);
+                     return (
+                       <span style={{
+                         display: "inline-flex", alignItems: "center", gap: 5,
+                         padding: "4px 12px", borderRadius: 99, fontSize: 11, fontWeight: 700,
+                         background: src.bg, color: src.color,
+                       }}>
+                         {src.icon && <Icon name={src.icon} size={13} />}
+                         {src.label}
+                       </span>
+                     );
+                   })()}
+                 </div>
                 <p style={{ color: "var(--text-muted)", fontSize: 13, marginBottom: 4 }}>
                   ID: {selectedAudit.audit_id}
                 </p>
@@ -529,7 +563,7 @@ export default function AuditsView() {
                   <th>Directory</th>
                   <th>Score</th>
                   <th>Findings</th>
-                  <th>Triggered By</th>
+                  <th>Source</th>
                   <th>Date</th>
                   <th></th>
                 </tr>
@@ -556,8 +590,21 @@ export default function AuditsView() {
                       </span>
                     </td>
                     <td>
-                      <span className="trigger-badge">{a.triggered_by}</span>
-                    </td>
+                       {(() => {
+                         const src = getAuditSource(a);
+                         return (
+                           <span style={{
+                             display: "inline-flex", alignItems: "center", gap: 5,
+                             padding: "3px 10px", borderRadius: 99, fontSize: 11, fontWeight: 700,
+                             background: src.bg, color: src.color,
+                             whiteSpace: "nowrap",
+                           }}>
+                             {src.icon && <Icon name={src.icon} size={12} />}
+                             {src.label}
+                           </span>
+                         );
+                       })()}
+                     </td>
                     <td style={{ color: "var(--text-muted)", fontSize: 12 }}>
                       {new Date(a.created_at).toLocaleDateString()}
                     </td>

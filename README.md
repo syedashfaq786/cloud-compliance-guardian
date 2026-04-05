@@ -1,4 +1,4 @@
-# ☁️ Cloud-Compliance Guardian
+# ☁️ Invecto Compliance Guard
 
 > **AI-powered Terraform compliance auditor** using Cisco Sec-8B for CIS Benchmark enforcement.
 
@@ -36,7 +36,7 @@ All inference runs on **your private infrastructure** via Ollama or vLLM — no 
 ## 📁 Project Structure
 
 ```
-cloud-compliance-guardian/
+invecto-compliance-guard/
 ├── auditor/          # Python backend — HCL parser, Sec-8B bridge, API
 │   ├── parser.py     # Multi-file .tf directory scanner
 │   ├── inference.py  # Chain-of-Thought prompting to Sec-8B
