@@ -81,6 +81,7 @@ class Audit(Base):
             "status": self.status,
             "triggered_by": self.triggered_by,
             "pr_url": self.pr_url,
+            "metadata_json": self.metadata_json,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
 
@@ -240,6 +241,7 @@ def save_audit(session: Session, audit_data: Dict[str, Any]) -> Audit:
         status=audit_data.get("status", "completed"),
         triggered_by=audit_data.get("triggered_by", "cli"),
         pr_url=audit_data.get("pr_url"),
+        metadata_json=audit_data.get("metadata_json"),
     )
     session.add(audit)
     session.flush()  # Get the audit.id

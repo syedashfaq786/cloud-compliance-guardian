@@ -61,8 +61,8 @@ def get_repo_metadata(repo_name: str) -> Dict[str, Any]:
     except Exception:
         return {"name": repo_name, "error": "Could not fetch metadata"}
 
-def sync_and_scan(repo_name: str) -> Dict[str, Any]:
-    """Pull latest changes and run compliance audit."""
+def sync_and_scan(repo_name: str, terraform_framework: str = "CIS") -> Dict[str, Any]:
+    """Pull latest changes and run Terraform compliance audit."""
     repo_path = os.path.join(REPOS_DIR, repo_name)
     if not os.path.exists(repo_path):
         raise FileNotFoundError(f"Repo {repo_name} not found")
@@ -73,6 +73,7 @@ def sync_and_scan(repo_name: str) -> Dict[str, Any]:
     # Run audit
     report = run_audit(
         directory=repo_path,
+        framework=(terraform_framework or "CIS"),
         triggered_by="github",
         pr_url=f"https://github.com/{repo_name}/commits/main"
     )

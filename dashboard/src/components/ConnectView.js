@@ -7,11 +7,23 @@ const API = "http://127.0.0.1:8000";
 export default function ConnectView() {
   const [selectedProvider, setSelectedProvider] = useState(null);
   const [isScanning, setIsScanning] = useState(false);
-  const [scanType, setScanType] = useState(null); // 'file' | 'provider' | null
+  const [scanType, setScanType] = useState(null); // 'file' | 'provider' | 'container' | null
   const [progress, setProgress] = useState(0);
   const [statusMessage, setStatusMessage] = useState("Initializing...");
   const [scanComplete, setScanComplete] = useState(false);
   const fileInputRef = useRef(null);
+
+  const [terraformFramework, setTerraformFramework] = useState("CIS");
+
+  // Container scanning state
+  const [containerFramework, setContainerFramework] = useState("CIS");
+  const [containerTarget, setContainerTarget] = useState("docker");
+  const [isScanningContainers, setIsScanningContainers] = useState(false);
+  const [uploadContext, setUploadContext] = useState({
+    target: "terraform",
+    framework: "CIS",
+    accept: ".tf,.tfvars",
+  });
 
   // GitHub state
   const [showGitHubModal, setShowGitHubModal] = useState(false);
@@ -21,6 +33,9 @@ export default function ConnectView() {
   const [syncing, setSyncing] = useState(false);
   const [githubError, setGithubError] = useState("");
   const [syncResult, setSyncResult] = useState(null);
+  const [githubTerraformFramework, setGithubTerraformFramework] = useState("CIS");
+  const [githubContainerFramework, setGithubContainerFramework] = useState("CIS");
+  const [githubScanContainers, setGithubScanContainers] = useState(true);
 
   // AWS state
   const [awsStatus, setAwsStatus] = useState(null);
@@ -257,7 +272,12 @@ export default function ConnectView() {
       const res = await fetch(`${API}/api/github/connect`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: repoUrl }),
+        body: JSON.stringify({
+          url: repoUrl,
+          terraform_framework: githubTerraformFramework,
+          container_framework: githubContainerFramework,
+          scan_containers: githubScanContainers,
+        }),
       });
       if (!res.ok) { const err = await res.json(); throw new Error(err.detail || "Failed to connect"); }
       const data = await res.json();
@@ -275,7 +295,15 @@ export default function ConnectView() {
     setSyncing(true);
     setSyncResult(null);
     try {
-      const res = await fetch(`${API}/api/github/sync`, { method: "POST" });
+      const res = await fetch(`${API}/api/github/sync`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          terraform_framework: githubTerraformFramework,
+          container_framework: githubContainerFramework,
+          scan_containers: githubScanContainers,
+        }),
+      });
       if (!res.ok) { const err = await res.json(); throw new Error(err.detail || "Sync failed"); }
       const data = await res.json();
       setSyncResult({ message: data.message || "Sync started." });
@@ -293,36 +321,74 @@ export default function ConnectView() {
 
   // ── File Upload ────────────────────────────────────────────────────────
 
-  const handleUploadClick = () => fileInputRef.current.click();
+  const handleUploadClick = (context = {}) => {
+    const nextContext = {
+      target: context.target || "terraform",
+      framework: context.framework || terraformFramework,
+      accept: context.accept || ".tf,.tfvars",
+    };
+    setUploadContext(nextContext);
+
+    if (!fileInputRef.current) return;
+    fileInputRef.current.value = "";
+    fileInputRef.current.accept = nextContext.accept;
+    fileInputRef.current.click();
+  };
 
   const handleFileChange = async (e) => {
     const files = e.target.files;
     if (files.length > 0) {
-      await uploadAndScan(files);
+      await uploadAndScan(files, uploadContext);
     }
   };
 
-  const uploadAndScan = async (files) => {
+  const uploadAndScan = async (files, context = {}) => {
+    const target = context.target || "terraform";
+    const selectedFramework = (context.framework || terraformFramework || "CIS").toUpperCase();
+    const targetLabel = target === "kubernetes" ? "Kubernetes" : target === "docker" ? "Docker" : "Terraform";
+
     setScanType("file");
     setIsScanning(true);
     setProgress(0);
     setScanComplete(false);
-    setStatusMessage("Uploading files...");
+    setStatusMessage(
+      target === "terraform"
+        ? `Uploading files (${selectedFramework})...`
+        : `Uploading ${targetLabel} files (${selectedFramework})...`
+    );
 
     // Create form data to upload files
     const formData = new FormData();
     for (const file of files) {
       formData.append("files", file);
     }
+    formData.append("target", target);
+    formData.append("framework", selectedFramework);
 
-    const steps = [
-      { p: 15, m: "Uploading files..." },
-      { p: 30, m: "Parsing HCL files..." },
-      { p: 50, m: "Running Cisco Sec-8B Inference..." },
-      { p: 70, m: "Analyzing against CIS Benchmarks..." },
-      { p: 90, m: "Calculating compliance score..." },
-      { p: 100, m: "Audit complete!" },
-    ];
+    const steps = target === "terraform"
+      ? [
+          { p: 15, m: "Uploading files..." },
+          { p: 30, m: "Parsing HCL files..." },
+          { p: 50, m: "Running Cisco Sec-8B Inference..." },
+          { p: 70, m: `Mapping checks to ${selectedFramework} controls...` },
+          { p: 90, m: "Calculating compliance score..." },
+          { p: 100, m: "Audit complete!" },
+        ]
+      : target === "docker"
+      ? [
+          { p: 15, m: "Uploading Docker files..." },
+          { p: 35, m: "Parsing Dockerfile / compose definitions..." },
+          { p: 60, m: `Running ${selectedFramework} static container checks...` },
+          { p: 85, m: "Generating compliance report..." },
+          { p: 100, m: "Docker file audit complete!" },
+        ]
+      : [
+          { p: 15, m: "Uploading Kubernetes manifests..." },
+          { p: 35, m: "Parsing YAML/JSON manifests..." },
+          { p: 60, m: `Running ${selectedFramework} static Kubernetes checks...` },
+          { p: 85, m: "Generating compliance report..." },
+          { p: 100, m: "Kubernetes file audit complete!" },
+        ];
     let currentStep = 0;
     const interval = setInterval(() => {
       setProgress((prev) => {
@@ -348,7 +414,11 @@ export default function ConnectView() {
       const data = await res.json();
       setProgress(100);
       setScanComplete(true);
-      setStatusMessage("Audit complete!");
+      setStatusMessage(
+        target === "terraform"
+          ? `${selectedFramework} audit complete!`
+          : `${selectedFramework} ${targetLabel} file audit complete!`
+      );
     } catch (err) {
       console.error("Upload/scan error:", err);
       setStatusMessage("Error: " + err.message);
@@ -358,13 +428,28 @@ export default function ConnectView() {
     }
   };
 
+  // ── Container Scanning ───────────────────────────────────────────────────
+
+  const startContainerScan = async ({ target = "docker", framework = "CIS" } = {}) => {
+    const normalizedTarget = target === "kubernetes" ? "kubernetes" : "docker";
+    const normalizedFramework = (framework || "CIS").toUpperCase() === "NIST" ? "NIST" : "CIS";
+    setContainerTarget(normalizedTarget);
+    setContainerFramework(normalizedFramework);
+    handleUploadClick({
+      target: normalizedTarget,
+      framework: normalizedFramework,
+      accept: normalizedTarget === "kubernetes" ? ".yaml,.yml,.json" : ".yaml,.yml,Dockerfile",
+    });
+  };
+
   // ── Scanning View ──────────────────────────────────────────────────────
 
   if (isScanning) {
-    // Determine which icon to show: completed checkmark, provider icon, or file icon
+    // Determine which icon to show: completed checkmark, provider icon, file icon, or container icon
     const getScanIcon = () => {
       if (scanComplete) return "circle-check";
       if (scanType === "file") return "file-code";
+      if (scanType === "container") return containerTarget === "kubernetes" ? "kubernetes" : "docker";
       return selectedProvider || "aws";
     };
 
@@ -378,7 +463,9 @@ export default function ConnectView() {
         </div>
         <h2>{scanComplete ? "Scan Successful" : "Scanning Infrastructure..."}</h2>
         <p style={{ color: "var(--text-secondary)", maxWidth: 450 }}>
-          {scanComplete ? "Your infrastructure has been analyzed." : "Processing your Terraform configuration using Cisco Sec-8B."}
+          {scanComplete
+            ? "Your infrastructure has been analyzed."
+            : "Processing uploaded infrastructure and container configuration files."}
         </p>
         <div className="progress-container">
           <div className="progress-info"><span>{statusMessage}</span><span>{Math.round(progress)}%</span></div>
@@ -402,7 +489,7 @@ export default function ConnectView() {
         <p>Connect your cloud accounts, upload Terraform files, or link a GitHub repository for compliance auditing.</p>
       </div>
 
-      <input type="file" multiple ref={fileInputRef} style={{ display: "none" }} onChange={handleFileChange} accept=".tf,.tfvars" />
+      <input type="file" multiple ref={fileInputRef} style={{ display: "none" }} onChange={handleFileChange} accept=".tf,.tfvars,.yaml,.yml,.json" />
 
       {/* ── Section 1: Cloud Providers ──────────────────────────────── */}
       <section style={{ marginBottom: 36 }}>
@@ -485,10 +572,34 @@ export default function ConnectView() {
           Upload configuration files from Terraform, Docker, or Kubernetes for compliance analysis.
         </p>
 
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 12, color: "var(--text-secondary)", fontWeight: 600 }}>Terraform Framework:</span>
+          {["CIS", "NIST", "CCM"].map((fw) => (
+            <button
+              key={fw}
+              type="button"
+              onClick={() => setTerraformFramework(fw)}
+              style={{
+                padding: "4px 10px",
+                borderRadius: 999,
+                border: "1px solid var(--border-color)",
+                background: terraformFramework === fw ? "var(--accent-primary)" : "var(--bg-secondary)",
+                color: terraformFramework === fw ? "#fff" : "var(--text-secondary)",
+                fontSize: 11,
+                fontWeight: 700,
+                cursor: "pointer",
+              }}
+            >
+              {fw}
+            </button>
+          ))}
+        </div>
+
         {/* Three upload cards */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16, marginBottom: 16 }}>
           {[
             {
+              id: "terraform",
               logo: "/logos/terraform.svg",
               name: "Terraform",
               desc: "HCL infrastructure definitions",
@@ -499,29 +610,41 @@ export default function ConnectView() {
               badge: "#5c4ee5",
             },
             {
+              id: "docker",
               logo: "/logos/docker.svg",
               name: "Docker",
-              desc: "Container image definitions",
+              desc: "Container image definitions & security",
               ext: "Dockerfile, .yaml",
               accept: ".yaml,.yml,Dockerfile",
               bg: "#2496ed10",
               border: "#2496ed30",
               badge: "#2496ed",
+              hasSecurityScan: true,
+              securityTarget: "docker",
+              securityFrameworks: ["CIS", "NIST"],
             },
             {
+              id: "kubernetes",
               logo: "/logos/kubernetes.svg",
               name: "Kubernetes",
-              desc: "Cluster resource manifests",
+              desc: "Cluster manifests & security",
               ext: ".yaml, .json",
               accept: ".yaml,.yml,.json",
               bg: "#326ce510",
               border: "#326ce530",
               badge: "#326ce5",
+              hasSecurityScan: true,
+              securityTarget: "kubernetes",
+              securityFrameworks: ["CIS", "NIST"],
             },
           ].map((tool) => (
             <div
               key={tool.name}
-              onClick={handleUploadClick}
+              onClick={() => handleUploadClick({
+                target: tool.id,
+                framework: tool.id === "terraform" ? terraformFramework : "CIS",
+                accept: tool.accept,
+              })}
               style={{
                 display: "flex", flexDirection: "column", alignItems: "center",
                 padding: "28px 20px 20px", borderRadius: 16, cursor: "pointer",
@@ -546,22 +669,56 @@ export default function ConnectView() {
                 {tool.ext}
               </div>
 
-              {/* Upload button */}
-              <button
-                onClick={(e) => { e.stopPropagation(); handleUploadClick(); }}
-                style={{
-                  display: "flex", alignItems: "center", gap: 6,
-                  padding: "8px 18px", borderRadius: 8,
-                  background: tool.badge, color: "#fff",
-                  border: "none", fontSize: 13, fontWeight: 600, cursor: "pointer",
-                  width: "100%", justifyContent: "center",
-                  transition: "opacity 0.15s",
-                }}
-                onMouseEnter={e => e.currentTarget.style.opacity = "0.85"}
-                onMouseLeave={e => e.currentTarget.style.opacity = "1"}
-              >
-                <Icon name="upload" size={14} /> Upload Files
-              </button>
+                {/* Action buttons */}
+              <div style={{ display: "flex", flexDirection: "column", gap: 8, width: "100%" }}>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleUploadClick({
+                      target: tool.id,
+                      framework: tool.id === "terraform" ? terraformFramework : "CIS",
+                      accept: tool.accept,
+                    });
+                  }}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 6,
+                    padding: "8px 18px", borderRadius: 8,
+                    background: tool.badge, color: "#fff",
+                    border: "none", fontSize: 13, fontWeight: 600, cursor: "pointer",
+                    width: "100%", justifyContent: "center",
+                    transition: "opacity 0.15s",
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.opacity = "0.85"}
+                  onMouseLeave={e => e.currentTarget.style.opacity = "1"}
+                >
+                  <Icon name="upload" size={14} /> Upload Files
+                </button>
+                
+                {tool.hasSecurityScan && (
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, width: "100%" }}>
+                    {tool.securityFrameworks.map((fw) => (
+                      <button
+                        key={`${tool.id}-${fw}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          startContainerScan({ target: tool.securityTarget, framework: fw });
+                        }}
+                        style={{
+                          display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+                          padding: "7px 10px", borderRadius: 8,
+                          background: "transparent", color: tool.badge,
+                          border: `1px solid ${tool.badge}`, fontSize: 12, fontWeight: 700, cursor: "pointer",
+                          transition: "all 0.15s",
+                        }}
+                        onMouseEnter={e => { e.currentTarget.style.background = `${tool.badge}15`; }}
+                        onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}
+                      >
+                        <Icon name={tool.name.toLowerCase()} size={12} /> {fw}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           ))}
         </div>
@@ -605,6 +762,60 @@ export default function ConnectView() {
                 {syncResult.error ? <span style={{ color: "#dc3545" }}>Sync failed: {syncResult.error}</span> : <span style={{ color: "#28a745" }}>{syncResult.message}</span>}
               </div>
             )}
+            <div className="glass-card" style={{ padding: 14, display: "flex", flexDirection: "column", gap: 10 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                <span style={{ fontSize: 12, color: "var(--text-secondary)", fontWeight: 600 }}>Terraform:</span>
+                {["CIS", "NIST", "CCM"].map((fw) => (
+                  <button
+                    key={`gh-tf-${fw}`}
+                    type="button"
+                    onClick={() => setGithubTerraformFramework(fw)}
+                    style={{
+                      padding: "4px 10px",
+                      borderRadius: 999,
+                      border: "1px solid var(--border-color)",
+                      background: githubTerraformFramework === fw ? "var(--accent-primary)" : "var(--bg-secondary)",
+                      color: githubTerraformFramework === fw ? "#fff" : "var(--text-secondary)",
+                      fontSize: 11,
+                      fontWeight: 700,
+                      cursor: "pointer",
+                    }}
+                  >
+                    {fw}
+                  </button>
+                ))}
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                <span style={{ fontSize: 12, color: "var(--text-secondary)", fontWeight: 600 }}>Containers:</span>
+                {["CIS", "NIST"].map((fw) => (
+                  <button
+                    key={`gh-container-${fw}`}
+                    type="button"
+                    onClick={() => setGithubContainerFramework(fw)}
+                    style={{
+                      padding: "4px 10px",
+                      borderRadius: 999,
+                      border: "1px solid var(--border-color)",
+                      background: githubContainerFramework === fw ? "var(--accent-primary)" : "var(--bg-secondary)",
+                      color: githubContainerFramework === fw ? "#fff" : "var(--text-secondary)",
+                      fontSize: 11,
+                      fontWeight: 700,
+                      cursor: "pointer",
+                    }}
+                  >
+                    {fw}
+                  </button>
+                ))}
+                <label style={{ marginLeft: 8, fontSize: 12, color: "var(--text-secondary)", display: "inline-flex", alignItems: "center", gap: 6 }}>
+                  <input
+                    type="checkbox"
+                    checked={githubScanContainers}
+                    onChange={(e) => setGithubScanContainers(e.target.checked)}
+                  />
+                  Scan Docker/Kubernetes files
+                </label>
+              </div>
+            </div>
             <div style={{ display: "flex", gap: 12 }}>
               <button className="save-btn" onClick={handleSyncRepo} disabled={syncing} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
                 {syncing ? (<><span style={{ width: 16, height: 16, border: "2px solid rgba(255,255,255,0.3)", borderTopColor: "#fff", borderRadius: "50%", animation: "spin 0.8s linear infinite", display: "inline-block" }}></span>Syncing...</>) : (<><Icon name="refresh" size={16} />Sync & Scan</>)}
@@ -617,7 +828,7 @@ export default function ConnectView() {
             <div className="github-icon-large"><Icon name="github" size={48} /></div>
             <div className="github-info">
               <h3>Connect GitHub Repository</h3>
-              <p>Link your repository to enable automated compliance scanning of Terraform code on every push.</p>
+              <p>Link your repository to enable automated Terraform, Dockerfile, and Kubernetes compliance scanning.</p>
             </div>
             <button className="connect-btn" onClick={() => setShowGitHubModal(true)}><Icon name="github" size={18} />Connect GitHub</button>
           </div>
@@ -771,7 +982,7 @@ export default function ConnectView() {
               </div>
               <div>
                 <h3 style={{ margin: 0, fontSize: 18 }}>Connect GitHub Repository</h3>
-                <p style={{ margin: 0, fontSize: 13, color: "var(--text-secondary)" }}>Enter the URL of your Terraform repository</p>
+                <p style={{ margin: 0, fontSize: 13, color: "var(--text-secondary)" }}>Enter the URL of your infrastructure repository</p>
               </div>
             </div>
             <div style={{ marginBottom: 20 }}>
@@ -781,6 +992,60 @@ export default function ConnectView() {
                 style={{ width: "100%", padding: "10px 14px", borderRadius: 8, border: `1px solid ${githubError ? "#dc3545" : "var(--border-color)"}`, background: "var(--bg-secondary)", color: "var(--text-primary)", fontSize: 14, outline: "none", boxSizing: "border-box" }}
                 onKeyDown={(e) => e.key === "Enter" && handleConnectGitHub()} autoFocus />
               {githubError && <p style={{ color: "#dc3545", fontSize: 12, marginTop: 6 }}>{githubError}</p>}
+            </div>
+            <div style={{ marginBottom: 16, display: "flex", flexDirection: "column", gap: 10 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                <span style={{ fontSize: 12, color: "var(--text-secondary)", fontWeight: 600 }}>Terraform Framework:</span>
+                {["CIS", "NIST", "CCM"].map((fw) => (
+                  <button
+                    key={`gh-modal-tf-${fw}`}
+                    type="button"
+                    onClick={() => setGithubTerraformFramework(fw)}
+                    style={{
+                      padding: "4px 10px",
+                      borderRadius: 999,
+                      border: "1px solid var(--border-color)",
+                      background: githubTerraformFramework === fw ? "var(--accent-primary)" : "var(--bg-secondary)",
+                      color: githubTerraformFramework === fw ? "#fff" : "var(--text-secondary)",
+                      fontSize: 11,
+                      fontWeight: 700,
+                      cursor: "pointer",
+                    }}
+                  >
+                    {fw}
+                  </button>
+                ))}
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                <span style={{ fontSize: 12, color: "var(--text-secondary)", fontWeight: 600 }}>Container Framework:</span>
+                {["CIS", "NIST"].map((fw) => (
+                  <button
+                    key={`gh-modal-container-${fw}`}
+                    type="button"
+                    onClick={() => setGithubContainerFramework(fw)}
+                    style={{
+                      padding: "4px 10px",
+                      borderRadius: 999,
+                      border: "1px solid var(--border-color)",
+                      background: githubContainerFramework === fw ? "var(--accent-primary)" : "var(--bg-secondary)",
+                      color: githubContainerFramework === fw ? "#fff" : "var(--text-secondary)",
+                      fontSize: 11,
+                      fontWeight: 700,
+                      cursor: "pointer",
+                    }}
+                  >
+                    {fw}
+                  </button>
+                ))}
+                <label style={{ marginLeft: 8, fontSize: 12, color: "var(--text-secondary)", display: "inline-flex", alignItems: "center", gap: 6 }}>
+                  <input
+                    type="checkbox"
+                    checked={githubScanContainers}
+                    onChange={(e) => setGithubScanContainers(e.target.checked)}
+                  />
+                  Scan Docker/Kubernetes files
+                </label>
+              </div>
             </div>
             <div style={{ display: "flex", gap: 12, justifyContent: "flex-end" }}>
               <button className="connect-btn" onClick={() => { setShowGitHubModal(false); setGithubError(""); }}

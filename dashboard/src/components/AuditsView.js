@@ -13,6 +13,27 @@ const SEVERITY_META = {
 
 const PROVIDER_ICON = { "AWS": "aws", "Azure": "azure", "GCP": "gcp" };
 
+const getAuditFramework = (audit) => {
+  if (!audit) return "CIS";
+  const meta = audit.metadata_json;
+  if (!meta) return "CIS";
+
+  if (typeof meta === "object" && meta.framework) {
+    return String(meta.framework).toUpperCase();
+  }
+
+  if (typeof meta === "string") {
+    try {
+      const parsed = JSON.parse(meta);
+      if (parsed?.framework) {
+        return String(parsed.framework).toUpperCase();
+      }
+    } catch {}
+  }
+
+  return "CIS";
+};
+
 export default function AuditsView() {
   const [audits, setAudits] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -97,6 +118,7 @@ export default function AuditsView() {
   // ── Audit Detail View ─────────────────────────────────────────────
   if (selectedAudit) {
     const score = selectedAudit.compliance_score;
+    const auditFramework = getAuditFramework(selectedAudit);
     const failedFindings = findings.filter(f => f.status === "FAIL");
     const passedFindings = findings.filter(f => f.status === "PASS");
 
@@ -360,7 +382,7 @@ export default function AuditsView() {
                     </div>
                     <div style={{ flex: 1 }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 2, flexWrap: "wrap" }}>
-                        <span className="rule-id" style={{ fontSize: 13 }}>CIS {f.rule_id}</span>
+                        <span className="rule-id" style={{ fontSize: 13 }}>{`${auditFramework} ${f.rule_id}`.trim()}</span>
                         <span className={`severity-badge ${f.severity.toLowerCase()}`}>{f.severity}</span>
                         <span style={{
                           fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 99,
@@ -473,7 +495,7 @@ export default function AuditsView() {
             <Icon name="circle-check" size={40} style={{ color: "var(--accent-green)", marginBottom: 12 }} />
             <h3 style={{ fontSize: 16, marginBottom: 6 }}>No Checks Performed</h3>
             <p style={{ color: "var(--text-muted)", fontSize: 13, maxWidth: 400, margin: "0 auto" }}>
-              No applicable CIS rules were found for the scanned resources. This may happen if the Terraform files don't contain auditable resource types.
+              No applicable {auditFramework} rules were found for the scanned resources. This may happen if the uploaded files don't contain auditable resource types.
             </p>
           </div>
         )}

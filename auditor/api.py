@@ -15,9 +15,11 @@ import os
 import csv
 import io
 import json
+import re
 import threading
+import uuid
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from datetime import datetime, timezone
 
 from dotenv import load_dotenv
@@ -42,7 +44,7 @@ _azure_scan_cache = None
 _gcp_scan_cache = None
 _container_scan_cache = {}
 
-from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect, BackgroundTasks, UploadFile, File
+from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect, BackgroundTasks, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -60,6 +62,7 @@ from .database import (
     save_github_repo,
     get_connected_repo,
     update_repo_sync_time,
+    save_audit,
 )
 from .audit import run_audit
 from .github import clone_repo, get_repo_metadata, sync_and_scan, get_repo_name_from_url
@@ -156,6 +159,7 @@ class ScanRequest(BaseModel):
     endpoint: Optional[str] = None
     model: Optional[str] = None
     backend: Optional[str] = None
+    framework: Optional[str] = "CIS"  # CIS | NIST | CCM
 
 
 class ScanResponse(BaseModel):
@@ -168,6 +172,15 @@ class ScanResponse(BaseModel):
 
 class GitHubConnectRequest(BaseModel):
     url: str
+    terraform_framework: Optional[str] = "CIS"  # CIS | NIST | CCM
+    container_framework: Optional[str] = "CIS"  # CIS | NIST
+    scan_containers: Optional[bool] = True
+
+
+class GitHubSyncRequest(BaseModel):
+    terraform_framework: Optional[str] = "CIS"  # CIS | NIST | CCM
+    container_framework: Optional[str] = "CIS"  # CIS | NIST
+    scan_containers: Optional[bool] = True
 
 
 class AWSScanRequest(BaseModel):
@@ -305,6 +318,7 @@ def trigger_scan(request: ScanRequest):
             endpoint=request.endpoint,
             model=request.model,
             backend=request.backend,
+            framework=(request.framework or "CIS"),
             triggered_by="api",
         )
         return ScanResponse(
@@ -314,19 +328,454 @@ def trigger_scan(request: ScanRequest):
             severity_counts=report.severity_counts,
             status=report.status,
         )
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def _safe_read_text(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        return path.read_text(encoding="utf-8", errors="ignore")
+    except Exception:
+        return ""
+
+
+def _build_static_container_finding(
+    *,
+    rule_id: str,
+    rule_title: str,
+    description: str,
+    severity: str,
+    status: str,
+    expected: str,
+    actual: str,
+    recommendation: str,
+    reasoning: str,
+    framework: str,
+    target: str,
+    file_path: str,
+) -> Dict[str, Any]:
+    provider = "Docker" if target == "docker" else "Kubernetes"
+    resource_type = "docker_file" if target == "docker" else "kubernetes_manifest"
+    resource_address = file_path or f"{target}-upload"
+    return {
+        "rule_id": rule_id,
+        "rule_title": rule_title,
+        "description": description,
+        "severity": severity,
+        "status": status,
+        "framework": framework,
+        "resource_type": resource_type,
+        "resource_address": resource_address,
+        "file_path": file_path,
+        "reasoning": reasoning,
+        "recommendation": recommendation,
+        "expected": expected,
+        "actual": actual,
+        "cloud_provider": provider,
+    }
+
+
+def _severity_counts_from_findings(findings: List[Dict[str, Any]]) -> Dict[str, int]:
+    counts = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0}
+    for finding in findings:
+        status = str(finding.get("status", "")).upper()
+        if status not in {"FAIL", "WARN"}:
+            continue
+        sev = str(finding.get("severity", "LOW")).upper()
+        if sev in counts:
+            counts[sev] += 1
+    return counts
+
+
+def _run_static_container_file_scan(directory: str, target: str, framework: str) -> Dict[str, Any]:
+    root = Path(directory)
+    target_norm = (target or "docker").strip().lower()
+    framework_norm = (framework or "CIS").strip().upper()
+    scan_time = datetime.now(timezone.utc).isoformat()
+
+    file_entries: List[Dict[str, str]] = []
+    for path in root.rglob("*"):
+        if not path.is_file():
+            continue
+        rel = str(path.relative_to(root)).replace("\\", "/")
+        text = _safe_read_text(path)
+        file_entries.append({"rel": rel, "name": path.name, "suffix": path.suffix.lower(), "text": text})
+
+    if target_norm == "docker":
+        docker_entries = []
+        compose_entries = []
+        for entry in file_entries:
+            name_lower = entry["name"].lower()
+            if (
+                name_lower == "dockerfile"
+                or name_lower.endswith(".dockerfile")
+                or name_lower.startswith("dockerfile.")
+            ):
+                docker_entries.append(entry)
+            elif entry["suffix"] in {".yml", ".yaml", ".json"} and (
+                "services:" in entry["text"].lower() or "\"services\"" in entry["text"].lower()
+            ):
+                compose_entries.append(entry)
+
+        if not docker_entries and not compose_entries:
+            raise HTTPException(status_code=400, detail="No Dockerfile or docker-compose files found in upload.")
+
+        if framework_norm == "CIS":
+            controls = {
+                "non_root": ("5.17.1", "Ensure 'USER' instruction is used in container images", "HIGH"),
+                "healthcheck": ("5.2.1", "Ensure health check instructions are included in container images", "LOW"),
+                "pinned_base": ("5.3.1", "Ensure minimal base images are used", "MEDIUM"),
+                "secret_env": ("5.5.1", "Ensure sensitive information is not included in container images", "HIGH"),
+            }
+        else:
+            controls = {
+                "non_root": ("AC-6", "Least Privilege", "HIGH"),
+                "healthcheck": ("AU-12", "Audit Generation", "MEDIUM"),
+                "pinned_base": ("CM-6", "Configuration Settings", "HIGH"),
+                "secret_env": ("SC-28", "Protection of Information at Rest", "HIGH"),
+            }
+
+        findings: List[Dict[str, Any]] = []
+
+        non_root_failures = []
+        non_root_failure_files = []
+        for entry in docker_entries:
+            user_values = re.findall(r"(?im)^\s*USER\s+([^\s#]+)", entry["text"])
+            if not user_values:
+                non_root_failures.append(f"{entry['rel']} (missing USER)")
+                non_root_failure_files.append(entry["rel"])
+                continue
+            last_user = user_values[-1].strip("\"'").lower()
+            if last_user in {"root", "0", "0:0"} or last_user.startswith("0:"):
+                non_root_failures.append(f"{entry['rel']} (USER {last_user})")
+                non_root_failure_files.append(entry["rel"])
+        for entry in compose_entries:
+            if re.search(r"(?im)^\s*user\s*:\s*[\"']?(root|0)([\"']|\s|$)", entry["text"]):
+                non_root_failures.append(f"{entry['rel']} (user: root)")
+                non_root_failure_files.append(entry["rel"])
+
+        non_root_status = "FAIL" if non_root_failures else "PASS"
+        non_root_actual = "; ".join(non_root_failures[:5]) if non_root_failures else "No root user directives detected"
+        non_root_file = ", ".join(list(dict.fromkeys(non_root_failure_files))[:3])
+        findings.append(_build_static_container_finding(
+            rule_id=controls["non_root"][0],
+            rule_title=controls["non_root"][1],
+            description="Container workloads should avoid running as root.",
+            severity=controls["non_root"][2],
+            status=non_root_status,
+            expected="Container definitions run as non-root users.",
+            actual=non_root_actual,
+            recommendation="Set USER in Dockerfile and avoid root users in compose definitions.",
+            reasoning="Static check over Dockerfile USER instructions and compose user fields.",
+            framework=framework_norm,
+            target="docker",
+            file_path=non_root_file,
+        ))
+
+        healthcheck_failures = []
+        for entry in docker_entries:
+            if not re.search(r"(?im)^\s*HEALTHCHECK\b", entry["text"]):
+                healthcheck_failures.append(entry["rel"])
+        healthcheck_status = "FAIL" if healthcheck_failures else "PASS"
+        healthcheck_actual = (
+            "No Dockerfile uploaded for HEALTHCHECK validation"
+            if not docker_entries else
+            (", ".join(healthcheck_failures[:5]) if healthcheck_failures else "HEALTHCHECK found in Dockerfile(s)")
+        )
+        findings.append(_build_static_container_finding(
+            rule_id=controls["healthcheck"][0],
+            rule_title=controls["healthcheck"][1],
+            description="Container definitions should include a health probe instruction.",
+            severity=controls["healthcheck"][2],
+            status=healthcheck_status,
+            expected="HEALTHCHECK instruction present in Dockerfile.",
+            actual=healthcheck_actual,
+            recommendation="Add HEALTHCHECK to Dockerfile to improve observability and recovery.",
+            reasoning="Static check over Dockerfile content.",
+            framework=framework_norm,
+            target="docker",
+            file_path=", ".join(healthcheck_failures[:3]),
+        ))
+
+        unpinned_base_images = []
+        unpinned_base_files = []
+        for entry in docker_entries:
+            images = re.findall(r"(?im)^\s*FROM\s+([^\s#]+)", entry["text"])
+            for image in images:
+                image_ref = image.strip()
+                if "@sha256:" in image_ref.lower():
+                    continue
+                image_name = image_ref.split("/")[-1]
+                if image_ref.lower().endswith(":latest") or ":" not in image_name:
+                    unpinned_base_images.append(f"{entry['rel']} ({image_ref})")
+                    unpinned_base_files.append(entry["rel"])
+        pinned_status = "FAIL" if unpinned_base_images else "PASS"
+        pinned_actual = "; ".join(unpinned_base_images[:5]) if unpinned_base_images else "Base images are version pinned"
+        findings.append(_build_static_container_finding(
+            rule_id=controls["pinned_base"][0],
+            rule_title=controls["pinned_base"][1],
+            description="Container definitions should avoid floating image tags.",
+            severity=controls["pinned_base"][2],
+            status=pinned_status,
+            expected="Base images are pinned to immutable digest or explicit non-latest tags.",
+            actual=pinned_actual,
+            recommendation="Pin base images to fixed tags or digests and avoid latest.",
+            reasoning="Static check over Dockerfile FROM instructions.",
+            framework=framework_norm,
+            target="docker",
+            file_path=", ".join(list(dict.fromkeys(unpinned_base_files))[:3]),
+        ))
+
+        secret_failures = []
+        docker_secret_pattern = re.compile(r"(?im)^\s*(ENV|ARG)\s+.*(PASSWORD|SECRET|TOKEN|API[_-]?KEY|ACCESS[_-]?KEY)\b")
+        compose_secret_pattern = re.compile(r"(?im)^\s*[-\w\"']*(PASSWORD|SECRET|TOKEN|API[_-]?KEY|ACCESS[_-]?KEY)[\w\"']*\s*[:=]\s*.+$")
+        for entry in docker_entries:
+            if docker_secret_pattern.search(entry["text"]):
+                secret_failures.append(entry["rel"])
+        for entry in compose_entries:
+            if compose_secret_pattern.search(entry["text"]):
+                secret_failures.append(entry["rel"])
+        secret_status = "FAIL" if secret_failures else "PASS"
+        secret_actual = ", ".join(secret_failures[:5]) if secret_failures else "No inline secrets detected"
+        findings.append(_build_static_container_finding(
+            rule_id=controls["secret_env"][0],
+            rule_title=controls["secret_env"][1],
+            description="Container definitions should not include plaintext secrets.",
+            severity=controls["secret_env"][2],
+            status=secret_status,
+            expected="No plaintext credentials in Dockerfile/compose files.",
+            actual=secret_actual,
+            recommendation="Move secrets to a secret manager or runtime-injected secure store.",
+            reasoning="Static pattern checks over ENV/ARG and compose environment definitions.",
+            framework=framework_norm,
+            target="docker",
+            file_path=", ".join(secret_failures[:3]),
+        ))
+
+        resource_files = docker_entries + compose_entries
+        benchmark_version = "CIS Docker Benchmark v1.8.0 (Static)" if framework_norm == "CIS" else "NIST SP 800-190 (Static)"
+    else:
+        manifest_entries = []
+        for entry in file_entries:
+            if entry["suffix"] not in {".yaml", ".yml", ".json"}:
+                continue
+            text_lower = entry["text"].lower()
+            if "apiversion" in text_lower or "kind" in text_lower:
+                manifest_entries.append(entry)
+
+        if not manifest_entries:
+            raise HTTPException(status_code=400, detail="No Kubernetes manifest files found in upload.")
+
+        if framework_norm == "CIS":
+            controls = {
+                "run_as_non_root": ("K8S-CIS-001", "Ensure containers run as non-root", "HIGH"),
+                "no_privilege_escalation": ("K8S-CIS-002", "Ensure privilege escalation is disabled", "HIGH"),
+                "read_only_root": ("K8S-CIS-003", "Ensure root filesystem is read-only", "MEDIUM"),
+                "avoid_public_service": ("K8S-CIS-004", "Ensure public LoadBalancer exposure is minimized", "MEDIUM"),
+            }
+        else:
+            controls = {
+                "run_as_non_root": ("AC-6", "Least Privilege", "HIGH"),
+                "no_privilege_escalation": ("SC-39", "Process Isolation", "HIGH"),
+                "read_only_root": ("SC-28", "Protection of Information at Rest", "HIGH"),
+                "avoid_public_service": ("SC-7", "Boundary Protection", "HIGH"),
+            }
+
+        workload_entries = []
+        service_entries = []
+        for entry in manifest_entries:
+            text = entry["text"]
+            if re.search(r"(?i)(^|\n)\s*kind\s*:\s*(Pod|Deployment|StatefulSet|DaemonSet|ReplicaSet|Job|CronJob)\b", text) or re.search(r'(?i)"kind"\s*:\s*"(Pod|Deployment|StatefulSet|DaemonSet|ReplicaSet|Job|CronJob)"', text):
+                workload_entries.append(entry)
+            if re.search(r"(?i)(^|\n)\s*kind\s*:\s*Service\b", text) or re.search(r'(?i)"kind"\s*:\s*"Service"', text):
+                service_entries.append(entry)
+
+        findings = []
+
+        run_as_non_root_failures = [
+            entry["rel"]
+            for entry in workload_entries
+            if not (re.search(r"(?i)runAsNonRoot\s*:\s*true", entry["text"]) or re.search(r'(?i)"runAsNonRoot"\s*:\s*true', entry["text"]))
+        ]
+        run_as_non_root_status = "FAIL" if run_as_non_root_failures else "PASS"
+        run_as_non_root_actual = (
+            "No workload manifests found"
+            if not workload_entries else
+            (", ".join(run_as_non_root_failures[:5]) if run_as_non_root_failures else "runAsNonRoot is configured")
+        )
+        findings.append(_build_static_container_finding(
+            rule_id=controls["run_as_non_root"][0],
+            rule_title=controls["run_as_non_root"][1],
+            description="Workload containers should run as non-root users.",
+            severity=controls["run_as_non_root"][2],
+            status=run_as_non_root_status,
+            expected="securityContext.runAsNonRoot: true",
+            actual=run_as_non_root_actual,
+            recommendation="Set securityContext.runAsNonRoot to true for all workload containers.",
+            reasoning="Static check over workload manifest securityContext fields.",
+            framework=framework_norm,
+            target="kubernetes",
+            file_path=", ".join(run_as_non_root_failures[:3]),
+        ))
+
+        privilege_escalation_failures = [
+            entry["rel"]
+            for entry in workload_entries
+            if not (re.search(r"(?i)allowPrivilegeEscalation\s*:\s*false", entry["text"]) or re.search(r'(?i)"allowPrivilegeEscalation"\s*:\s*false', entry["text"]))
+        ]
+        privilege_escalation_status = "FAIL" if privilege_escalation_failures else "PASS"
+        privilege_escalation_actual = (
+            "No workload manifests found"
+            if not workload_entries else
+            (", ".join(privilege_escalation_failures[:5]) if privilege_escalation_failures else "allowPrivilegeEscalation is disabled")
+        )
+        findings.append(_build_static_container_finding(
+            rule_id=controls["no_privilege_escalation"][0],
+            rule_title=controls["no_privilege_escalation"][1],
+            description="Workload containers should disable privilege escalation.",
+            severity=controls["no_privilege_escalation"][2],
+            status=privilege_escalation_status,
+            expected="securityContext.allowPrivilegeEscalation: false",
+            actual=privilege_escalation_actual,
+            recommendation="Set securityContext.allowPrivilegeEscalation to false.",
+            reasoning="Static check over workload manifest securityContext fields.",
+            framework=framework_norm,
+            target="kubernetes",
+            file_path=", ".join(privilege_escalation_failures[:3]),
+        ))
+
+        readonly_root_failures = [
+            entry["rel"]
+            for entry in workload_entries
+            if not (re.search(r"(?i)readOnlyRootFilesystem\s*:\s*true", entry["text"]) or re.search(r'(?i)"readOnlyRootFilesystem"\s*:\s*true', entry["text"]))
+        ]
+        readonly_root_status = "FAIL" if readonly_root_failures else "PASS"
+        readonly_root_actual = (
+            "No workload manifests found"
+            if not workload_entries else
+            (", ".join(readonly_root_failures[:5]) if readonly_root_failures else "readOnlyRootFilesystem is enabled")
+        )
+        findings.append(_build_static_container_finding(
+            rule_id=controls["read_only_root"][0],
+            rule_title=controls["read_only_root"][1],
+            description="Workload containers should use read-only root filesystems where possible.",
+            severity=controls["read_only_root"][2],
+            status=readonly_root_status,
+            expected="securityContext.readOnlyRootFilesystem: true",
+            actual=readonly_root_actual,
+            recommendation="Set securityContext.readOnlyRootFilesystem to true.",
+            reasoning="Static check over workload manifest securityContext fields.",
+            framework=framework_norm,
+            target="kubernetes",
+            file_path=", ".join(readonly_root_failures[:3]),
+        ))
+
+        public_service_failures = [
+            entry["rel"]
+            for entry in service_entries
+            if re.search(r"(?i)(^|\n)\s*type\s*:\s*LoadBalancer\b", entry["text"]) or re.search(r'(?i)"type"\s*:\s*"LoadBalancer"', entry["text"])
+        ]
+        public_service_status = "FAIL" if public_service_failures else "PASS"
+        public_service_actual = (
+            "No Service manifests found"
+            if not service_entries else
+            (", ".join(public_service_failures[:5]) if public_service_failures else "No public LoadBalancer Services detected")
+        )
+        findings.append(_build_static_container_finding(
+            rule_id=controls["avoid_public_service"][0],
+            rule_title=controls["avoid_public_service"][1],
+            description="Service definitions should minimize unnecessary public exposure.",
+            severity=controls["avoid_public_service"][2],
+            status=public_service_status,
+            expected="Service type should avoid unrestricted LoadBalancer exposure.",
+            actual=public_service_actual,
+            recommendation="Prefer ClusterIP/Internal LoadBalancer and restrict ingress exposure.",
+            reasoning="Static check over Service manifest type fields.",
+            framework=framework_norm,
+            target="kubernetes",
+            file_path=", ".join(public_service_failures[:3]),
+        ))
+
+        resource_files = manifest_entries
+        benchmark_version = "CIS Kubernetes Benchmark v1.12.0 (Static)" if framework_norm == "CIS" else "NIST SP 800-190 (Static)"
+
+    pass_count = sum(1 for f in findings if str(f.get("status", "")).upper() == "PASS")
+    fail_count = sum(1 for f in findings if str(f.get("status", "")).upper() == "FAIL")
+    total = len(findings)
+    health_score = round((pass_count / total) * 100, 1) if total else 100.0
+
+    resources = [
+        {
+            "resource_id": str(uuid.uuid5(uuid.NAMESPACE_URL, f"{target_norm}:{entry['rel']}"))[:16],
+            "resource_name": entry["rel"],
+            "resource_type": "docker_file" if target_norm == "docker" else "k8s_manifest",
+            "region": "uploaded-files",
+            "config": {"path": entry["rel"]},
+        }
+        for entry in resource_files
+    ]
+
+    return {
+        "scan_time": scan_time,
+        "target": target_norm,
+        "framework": framework_norm,
+        "mode": "file_upload",
+        "docker_available": target_norm == "docker",
+        "kubernetes_available": target_norm == "kubernetes",
+        "resources": resources,
+        "audit": {
+            "findings": findings,
+            "summary": {
+                "total": total,
+                "pass": pass_count,
+                "fail": fail_count,
+                "warn": 0,
+                "info": 0,
+                "health_score": health_score,
+            },
+            "health_score": health_score,
+            "framework": framework_norm,
+            "target": target_norm,
+            "benchmark_version": benchmark_version,
+        },
+        "scan": {
+            "total_resources": len(resources),
+            "docker_containers": 0,
+            "docker_images": 0,
+            "k8s_resources": 0,
+        },
+    }
+
+
 @app.post("/api/scan/upload", response_model=ScanResponse)
-async def upload_and_scan(files: List[UploadFile] = File(...)):
-    """Upload Terraform files and trigger a compliance audit."""
+async def upload_and_scan(
+    files: List[UploadFile] = File(...),
+    target: str = Form("terraform"),
+    framework: str = Form("CIS"),
+):
+    """Upload IaC files and trigger Terraform or container static compliance audit."""
     import shutil
     import tempfile
-    
+
+    selected_target = (target or "terraform").strip().lower()
+    if selected_target not in {"terraform", "docker", "kubernetes"}:
+        raise HTTPException(status_code=400, detail="Invalid target. Use terraform, docker, or kubernetes.")
+
     # Create a temporary directory to store uploaded files
-    temp_dir = tempfile.mkdtemp(prefix="terraform_upload_")
-    
+    temp_dir = tempfile.mkdtemp(prefix=f"{selected_target}_upload_")
+
+    selected_framework = (framework or "CIS").upper()
+    if selected_target == "terraform":
+        if selected_framework not in {"CIS", "NIST", "CCM"}:
+            raise HTTPException(status_code=400, detail="Invalid framework for Terraform. Use CIS, NIST, or CCM.")
+    else:
+        if selected_framework not in {"CIS", "NIST"}:
+            raise HTTPException(status_code=400, detail="Invalid framework for container file scan. Use CIS or NIST.")
+
     try:
         # Save uploaded files to temp directory
         saved_files = []
@@ -340,20 +789,50 @@ async def upload_and_scan(files: List[UploadFile] = File(...)):
         
         if not saved_files:
             raise HTTPException(status_code=400, detail="No valid files uploaded")
-        
-        # Run audit on the uploaded files
-        report = run_audit(
+
+        if selected_target == "terraform":
+            report = run_audit(
+                directory=temp_dir,
+                framework=selected_framework,
+                triggered_by="file_upload",
+            )
+
+            return ScanResponse(
+                audit_id=report.audit_id,
+                compliance_score=report.compliance_score,
+                total_findings=report.total_findings,
+                severity_counts=report.severity_counts,
+                status=report.status,
+            )
+
+        container_result = _run_static_container_file_scan(
             directory=temp_dir,
-            triggered_by="file_upload",
+            target=selected_target,
+            framework=selected_framework,
         )
-        
+        audit_id = _persist_container_audit(
+            container_result,
+            framework=selected_framework,
+            target=selected_target,
+            mode="file_upload",
+        )
+        if not audit_id:
+            raise HTTPException(status_code=500, detail="Container scan completed but could not be saved to audit history.")
+
+        findings = (container_result.get("audit") or {}).get("findings") or []
+        severity_counts = _severity_counts_from_findings(findings)
+        total_findings = sum(severity_counts.values())
+        compliance_score = float((container_result.get("audit") or {}).get("health_score", 0.0) or 0.0)
+
         return ScanResponse(
-            audit_id=report.audit_id,
-            compliance_score=report.compliance_score,
-            total_findings=report.total_findings,
-            severity_counts=report.severity_counts,
-            status=report.status,
+            audit_id=audit_id,
+            compliance_score=compliance_score,
+            total_findings=total_findings,
+            severity_counts=severity_counts,
+            status="completed",
         )
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     finally:
@@ -497,6 +976,10 @@ def ack_drift_alert(alert_id: int):
 def connect_github(request: GitHubConnectRequest):
     """Clone a GitHub repo, save to DB, and auto-trigger a scan."""
     try:
+        terraform_framework = _normalize_terraform_framework(request.terraform_framework)
+        container_framework = _normalize_container_framework(request.container_framework)
+        scan_containers = True if request.scan_containers is None else bool(request.scan_containers)
+
         repo_name = clone_repo(request.url)
         metadata = get_repo_metadata(repo_name)
 
@@ -512,21 +995,35 @@ def connect_github(request: GitHubConnectRequest):
         # Auto-trigger scan in background after cloning
         def _auto_scan():
             try:
-                sync_and_scan(repo_name)
-            except Exception:
-                pass
+                _run_github_repo_scan(
+                    repo_name=repo_name,
+                    terraform_framework=terraform_framework,
+                    container_framework=container_framework,
+                    scan_containers=scan_containers,
+                )
+            except Exception as exc:
+                logger.exception("GitHub auto scan failed for %s: %s", repo_name, exc)
             try:
                 s = get_session()
                 update_repo_sync_time(s, repo_id)
                 s.close()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.exception("Failed updating repo sync time for %s: %s", repo_name, exc)
 
         thread = threading.Thread(target=_auto_scan, daemon=True)
         thread.start()
 
         result["scan_triggered"] = True
-        result["message"] = "Repository cloned and scan started. Check the Audits tab for results."
+        result["scan_config"] = {
+            "terraform_framework": terraform_framework,
+            "container_framework": container_framework,
+            "scan_containers": scan_containers,
+        }
+        result["message"] = (
+            f"Repository cloned. Background scan started for Terraform ({terraform_framework})"
+            + (f" and Docker/Kubernetes ({container_framework})." if scan_containers else ".")
+            + " Check the Audits tab for results."
+        )
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -552,8 +1049,12 @@ def get_github_repo():
 
 
 @app.post("/api/github/sync")
-def sync_github_repo():
+def sync_github_repo(request: Optional[GitHubSyncRequest] = None):
     """Pull latest changes and run a compliance scan."""
+    terraform_framework = _normalize_terraform_framework((request.terraform_framework if request else "CIS"))
+    container_framework = _normalize_container_framework((request.container_framework if request else "CIS"))
+    scan_containers = True if (request is None or request.scan_containers is None) else bool(request.scan_containers)
+
     session = get_session()
     try:
         repo = get_connected_repo(session)
@@ -567,20 +1068,37 @@ def sync_github_repo():
         # Run scan in background thread so the API responds quickly
         def _background_scan():
             try:
-                sync_and_scan(repo_name)
-            except Exception:
-                pass
+                _run_github_repo_scan(
+                    repo_name=repo_name,
+                    terraform_framework=terraform_framework,
+                    container_framework=container_framework,
+                    scan_containers=scan_containers,
+                )
+            except Exception as exc:
+                logger.exception("GitHub sync scan failed for %s: %s", repo_name, exc)
             try:
                 s = get_session()
                 update_repo_sync_time(s, repo_id)
                 s.close()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.exception("Failed updating repo sync time for %s: %s", repo_name, exc)
 
         thread = threading.Thread(target=_background_scan, daemon=True)
         thread.start()
 
-        return {"status": "syncing", "message": "Sync started. Audit will appear in Audits tab when complete."}
+        return {
+            "status": "syncing",
+            "scan_config": {
+                "terraform_framework": terraform_framework,
+                "container_framework": container_framework,
+                "scan_containers": scan_containers,
+            },
+            "message": (
+                f"Sync started for Terraform ({terraform_framework})"
+                + (f" and Docker/Kubernetes ({container_framework})." if scan_containers else ".")
+                + " Audits will appear in the Audits tab when complete."
+            ),
+        }
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
@@ -714,6 +1232,186 @@ def _load_scan_cache(provider: str = "aws") -> dict:
         except Exception:
             pass
     return {}
+
+
+def _persist_container_audit(
+    result: Dict[str, Any],
+    framework: str,
+    target: str,
+    mode: str = "runtime",
+    triggered_by: str = "container_scan",
+    source_directory: Optional[str] = None,
+) -> Optional[str]:
+    """Persist container scan result to audits/findings tables so it appears in audit history."""
+    try:
+        findings = (result.get("audit") or {}).get("findings") or []
+        resources = result.get("resources") or []
+        summary = (result.get("audit") or {}).get("summary") or {}
+
+        failed_findings = [
+            f for f in findings
+            if str(f.get("status", "")).upper() in {"FAIL", "WARN"}
+        ]
+
+        sev_counts = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0}
+        for finding in failed_findings:
+            sev = str(finding.get("severity", "LOW")).upper()
+            if sev in sev_counts:
+                sev_counts[sev] += 1
+
+        mapped_findings = []
+        for finding in findings:
+            raw_status = str(finding.get("status", "FAIL")).upper()
+            db_status = "PASS" if raw_status == "PASS" else "FAIL"
+            mapped_findings.append({
+                "rule_id": finding.get("rule_id") or finding.get("cis_rule_id") or "",
+                "rule_title": finding.get("rule_title") or finding.get("title") or "Container Security Control",
+                "severity": finding.get("severity", "LOW"),
+                "resource_address": finding.get("resource_address") or finding.get("resource_name") or f"{target}-host",
+                "resource_type": finding.get("resource_type") or f"{target}_resource",
+                "file_path": finding.get("file_path", ""),
+                "description": finding.get("description", ""),
+                "remediation_hcl": finding.get("remediation_hcl", ""),
+                "reasoning": finding.get("reasoning", ""),
+                "expected": finding.get("expected", ""),
+                "actual": finding.get("actual", ""),
+                "recommendation": finding.get("recommendation") or finding.get("remediation_step", ""),
+                "cloud_provider": finding.get("cloud_provider", "Container"),
+                "status": db_status,
+                "confidence": float(finding.get("confidence", 1.0) or 1.0),
+            })
+
+        audit_id = str(uuid.uuid4())[:12]
+        session = get_session()
+        files_scanned = len(resources) if mode in {"file_upload", "repository"} else 0
+        save_audit(session, {
+            "audit_id": audit_id,
+            "directory": source_directory or f"container://{target}",
+            "files_scanned": files_scanned,
+            "resources_scanned": len(resources),
+            "total_findings": len(failed_findings),
+            "critical_count": sev_counts["CRITICAL"],
+            "high_count": sev_counts["HIGH"],
+            "medium_count": sev_counts["MEDIUM"],
+            "low_count": sev_counts["LOW"],
+            "compliance_score": float((result.get("audit") or {}).get("health_score", summary.get("health_score", 0.0)) or 0.0),
+            "status": "completed",
+            "triggered_by": triggered_by,
+            "metadata_json": {
+                "domain": "container",
+                "target": target,
+                "framework": framework,
+                "mode": mode,
+                "source": "github" if triggered_by == "github" else "direct",
+                "scan_time": result.get("scan_time"),
+                "benchmark_version": (result.get("audit") or {}).get("benchmark_version") or result.get("benchmark_version"),
+            },
+            "findings": mapped_findings,
+        })
+        session.close()
+        return audit_id
+    except Exception as exc:
+        logger.exception("Failed to persist container audit: %s", exc)
+        return None
+
+
+def _normalize_terraform_framework(value: Optional[str]) -> str:
+    fw = (value or "CIS").strip().upper()
+    if fw not in {"CIS", "NIST", "CCM"}:
+        raise HTTPException(status_code=400, detail="Invalid Terraform framework. Use CIS, NIST, or CCM.")
+    return fw
+
+
+def _normalize_container_framework(value: Optional[str]) -> str:
+    fw = (value or "CIS").strip().upper()
+    if fw not in {"CIS", "NIST"}:
+        raise HTTPException(status_code=400, detail="Invalid container framework. Use CIS or NIST.")
+    return fw
+
+
+def _run_github_repo_scan(
+    repo_name: str,
+    terraform_framework: str = "CIS",
+    container_framework: str = "CIS",
+    scan_containers: bool = True,
+) -> Dict[str, Any]:
+    """Run GitHub repo scan workflow across Terraform and (optionally) static container file audits."""
+    repo_path = Path(__file__).parent / "repos" / repo_name
+    if not repo_path.exists():
+        raise FileNotFoundError(f"Repo {repo_name} not found")
+
+    scan_summary: Dict[str, Any] = {
+        "repo": repo_name,
+        "terraform_framework": terraform_framework,
+        "container_framework": container_framework,
+        "scan_containers": scan_containers,
+        "terraform_audit_id": None,
+        "container": [],
+    }
+
+    terraform_report = sync_and_scan(repo_name, terraform_framework=terraform_framework)
+    scan_summary["terraform_audit_id"] = terraform_report.get("audit_id")
+
+    if not scan_containers:
+        return scan_summary
+
+    for target in ("docker", "kubernetes"):
+        try:
+            container_result = _run_static_container_file_scan(
+                directory=str(repo_path),
+                target=target,
+                framework=container_framework,
+            )
+            audit_id = _persist_container_audit(
+                container_result,
+                framework=container_framework,
+                target=target,
+                mode="repository",
+                triggered_by="github",
+                source_directory=str(repo_path),
+            )
+            if audit_id:
+                scan_summary["container"].append({
+                    "target": target,
+                    "framework": container_framework,
+                    "audit_id": audit_id,
+                    "status": "completed",
+                })
+            else:
+                scan_summary["container"].append({
+                    "target": target,
+                    "framework": container_framework,
+                    "status": "error",
+                    "reason": "Persistence failed",
+                })
+        except HTTPException as exc:
+            detail = str(exc.detail)
+            if exc.status_code == 400 and (
+                "No Dockerfile or docker-compose files found" in detail
+                or "No Kubernetes manifest files found" in detail
+            ):
+                scan_summary["container"].append({
+                    "target": target,
+                    "framework": container_framework,
+                    "status": "skipped",
+                    "reason": detail,
+                })
+                continue
+            scan_summary["container"].append({
+                "target": target,
+                "framework": container_framework,
+                "status": "error",
+                "reason": detail,
+            })
+        except Exception as exc:
+            scan_summary["container"].append({
+                "target": target,
+                "framework": container_framework,
+                "status": "error",
+                "reason": str(exc),
+            })
+
+    return scan_summary
 
 
 @app.get("/api/aws/status")
@@ -1090,16 +1788,43 @@ def get_latest_gcp_scan():
 
 # ─── Container (Docker / Kubernetes) Endpoints ───────────────────────────────
 
+class ContainerScanRequest(BaseModel):
+    target: str = "docker"  # docker | kubernetes
+    framework: str = "CIS"  # CIS | NIST
+    mode: str = "runtime"   # runtime
+
 @app.post("/api/container/scan")
-async def run_container_scan():
-    """Run a full Docker and Kubernetes security scan using CIS Benchmarks."""
+async def run_container_scan(request: ContainerScanRequest = None):
+    """Run container security scan for docker/kubernetes using CIS or NIST controls."""
     global _container_scan_cache
 
     if ContainerAuditor is None:
         raise HTTPException(status_code=500, detail="ContainerAuditor module is not available.")
 
+    target = ((request.target if request else "docker") or "docker").strip().lower()
+    framework = ((request.framework if request else "CIS") or "CIS").strip().upper()
+    mode = ((request.mode if request else "runtime") or "runtime").strip().lower()
+
+    if target not in {"docker", "kubernetes"}:
+        raise HTTPException(status_code=400, detail="Invalid target. Use 'docker' or 'kubernetes'.")
+    if framework not in {"CIS", "NIST"}:
+        raise HTTPException(status_code=400, detail="Invalid framework. Use 'CIS' or 'NIST'.")
+    if mode != "runtime":
+        raise HTTPException(status_code=400, detail="Only runtime mode is currently supported for container scans.")
+    
     auditor = ContainerAuditor()
-    result = auditor.run_full_scan()
+    result = auditor.run_full_scan(framework=framework, target=target)
+    
+    # Add workflow metadata
+    result["framework"] = framework
+    result["target"] = target
+    result["mode"] = mode
+    result["audit"]["framework"] = framework
+    result["audit"]["target"] = target
+
+    audit_id = _persist_container_audit(result, framework=framework, target=target, mode=mode)
+    if audit_id:
+        result["audit_id"] = audit_id
 
     _container_scan_cache = result
     _save_scan_cache(result, "container")
@@ -1124,7 +1849,7 @@ def get_latest_container_scan():
 @app.get("/api/container/scan/report")
 def download_container_report(
     format: str = Query("pdf", pattern="^(pdf|csv|json)$"),
-    framework: str = Query("All", pattern="^(All|CIS|NIST|CCM)$"),
+    framework: str = Query("All", pattern="^(All|CIS|NIST)$"),
 ):
     """Download the latest Container scan report as PDF, CSV, or JSON."""
     if not _container_scan_cache:
@@ -1133,11 +1858,10 @@ def download_container_report(
     audit_data = _container_scan_cache.get("audit", {})
     all_findings = audit_data.get("findings", [])
 
-    # Container reports always use CIS framework; NIST/CCM fall back to all findings
+    # Container reports support CIS and NIST framework filtering
     if framework == "CIS":
         findings_list = [f for f in all_findings if str(f.get("framework", "CIS")).upper() == "CIS"]
-    elif framework in ("NIST", "CCM"):
-        # Container checks are CIS-based; for NIST/CCM return all findings with framework label
+    elif framework == "NIST":
         findings_list = all_findings
     else:
         findings_list = all_findings
@@ -1149,8 +1873,10 @@ def download_container_report(
     scan_meta = {
         "scan_time": scan_time,
         "docker_available": _container_scan_cache.get("docker_available", False),
-        "k8s_available": _container_scan_cache.get("k8s_available", False),
+        "kubernetes_available": _container_scan_cache.get("kubernetes_available", False),
         "total_resources": _container_scan_cache.get("scan", {}).get("total_resources", 0),
+        "target": _container_scan_cache.get("target", "docker"),
+        "mode": _container_scan_cache.get("mode", "runtime"),
         "framework": framework,
     }
 

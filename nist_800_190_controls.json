@@ -1,0 +1,693 @@
+{
+  "Section 1": {
+    "title": "Container Image Security",
+    "controls": [
+      {
+        "id": "AC-1",
+        "title": "Access Control Policy and Procedures",
+        "description": "The organization develops, documents, and disseminates access control policy and procedures.",
+        "severity": "HIGH",
+        "check_command": "Check for container image access control policies",
+        "remediation": "Develop and implement formal access control policies for container images",
+        "test_type": "policy_check"
+      },
+      {
+        "id": "AC-2",
+        "title": "Account Management",
+        "description": "The organization manages information system accounts and associated access authorizations.",
+        "severity": "HIGH",
+        "check_command": "Check container registry account management",
+        "remediation": "Implement proper account management for container registries",
+        "test_type": "registry_check"
+      },
+      {
+        "id": "AC-3",
+        "title": "Access Enforcement",
+        "description": "The information system enforces approved authorizations for logical access to information.",
+        "severity": "HIGH",
+        "check_command": "Check container runtime access controls",
+        "remediation": "Enforce access controls at container runtime",
+        "test_type": "runtime_check"
+      },
+      {
+        "id": "AC-4",
+        "title": "Information Flow Enforcement",
+        "description": "The information system enforces approved authorizations for controlling the flow of information.",
+        "severity": "HIGH",
+        "check_command": "Check container network policies",
+        "remediation": "Implement network policies to control information flow",
+        "test_type": "network_check"
+      },
+      {
+        "id": "AC-5",
+        "title": "Separation of Duties",
+        "description": "The organization separates duties of individuals to reduce risk of malevolent action.",
+        "severity": "MEDIUM",
+        "check_command": "Check container development and deployment roles",
+        "remediation": "Implement separation of duties for container lifecycle",
+        "test_type": "role_check"
+      },
+      {
+        "id": "AC-6",
+        "title": "Least Privilege",
+        "description": "The organization employs the principle of least privilege.",
+        "severity": "HIGH",
+        "check_command": "Check container user permissions",
+        "remediation": "Configure containers to run with least privilege",
+        "test_type": "container_check"
+      },
+      {
+        "id": "AC-7",
+        "title": "Successful Logon and Access Attempts",
+        "description": "The information system warns the user of successful logon and access attempts.",
+        "severity": "LOW",
+        "check_command": "Check container access logging",
+        "remediation": "Enable logging of successful container access attempts",
+        "test_type": "logging_check"
+      },
+      {
+        "id": "AC-8",
+        "title": "Unsuccessful Logon and Access Attempts",
+        "description": "The information system displays appropriate warnings for unsuccessful logon attempts.",
+        "severity": "MEDIUM",
+        "check_command": "Check container access failure logging",
+        "remediation": "Enable logging of unsuccessful container access attempts",
+        "test_type": "logging_check"
+      },
+      {
+        "id": "AC-17",
+        "title": "Remote Access",
+        "description": "The organization authorizes, monitors, and controls remote access to the information system.",
+        "severity": "HIGH",
+        "check_command": "Check container remote access controls",
+        "remediation": "Implement proper remote access controls for containers",
+        "test_type": "access_check"
+      },
+      {
+        "id": "AC-19",
+        "title": "Access Control for Mobile Devices",
+        "description": "The organization authorizes, monitors, and controls access to the information system from mobile devices.",
+        "severity": "MEDIUM",
+        "check_command": "Check mobile device access to containers",
+        "remediation": "Implement mobile device access controls for containers",
+        "test_type": "access_check"
+      }
+    ]
+  },
+  "Section 2": {
+    "title": "Container Runtime Security",
+    "controls": [
+      {
+        "id": "SC-1",
+        "title": "System and Communications Protection Policy and Procedures",
+        "description": "The organization develops, documents, and disseminates system and communications protection policy.",
+        "severity": "HIGH",
+        "check_command": "Check container runtime security policies",
+        "remediation": "Develop container runtime security policies",
+        "test_type": "policy_check"
+      },
+      {
+        "id": "SC-2",
+        "title": "System and Communications Protection Policy and Procedures",
+        "description": "The information system separates user functionality from system management functionality.",
+        "severity": "HIGH",
+        "check_command": "Check container runtime separation",
+        "remediation": "Separate user and management functions in containers",
+        "test_type": "runtime_check"
+      },
+      {
+        "id": "SC-3",
+        "title": "Security Function Isolation",
+        "description": "The information system isolates security functions from non-security functions.",
+        "severity": "HIGH",
+        "check_command": "Check container security function isolation",
+        "remediation": "Isolate security functions in container runtime",
+        "test_type": "runtime_check"
+      },
+      {
+        "id": "SC-4",
+        "title": "Information in Shared Resources",
+        "description": "The information system prevents unauthorized and unintended information transfer.",
+        "severity": "HIGH",
+        "check_command": "Check container shared resource protection",
+        "remediation": "Implement protection for shared container resources",
+        "test_type": "resource_check"
+      },
+      {
+        "id": "SC-7",
+        "title": "Boundary Protection",
+        "description": "The information system monitors and controls communications at the external boundary.",
+        "severity": "HIGH",
+        "check_command": "Check container network boundary protection",
+        "remediation": "Implement network boundary protection for containers",
+        "test_type": "network_check"
+      },
+      {
+        "id": "SC-8",
+        "title": "Transmission Confidentiality and Integrity",
+        "description": "The information system protects the confidentiality and integrity of transmitted information.",
+        "severity": "HIGH",
+        "check_command": "Check container communication encryption",
+        "remediation": "Implement encryption for container communications",
+        "test_type": "encryption_check"
+      },
+      {
+        "id": "SC-12",
+        "title": "Cryptographic Key Establishment and Management",
+        "description": "The information system establishes and manages cryptographic keys.",
+        "severity": "HIGH",
+        "check_command": "Check container key management",
+        "remediation": "Implement proper key management for containers",
+        "test_type": "key_check"
+      },
+      {
+        "id": "SC-13",
+        "title": "Use of Cryptography",
+        "description": "The information system uses cryptography to protect information.",
+        "severity": "HIGH",
+        "check_command": "Check container cryptographic usage",
+        "remediation": "Implement appropriate cryptography in containers",
+        "test_type": "crypto_check"
+      },
+      {
+        "id": "SC-15",
+        "title": "Collaborative Computing Devices",
+        "description": "The information system prohibits remote activation of collaborative computing devices.",
+        "severity": "MEDIUM",
+        "check_command": "Check container collaborative computing restrictions",
+        "remediation": "Restrict collaborative computing in containers",
+        "test_type": "runtime_check"
+      },
+      {
+        "id": "SC-16",
+        "title": "Transmission of Security and Privacy Attributes",
+        "description": "The information system associates security and privacy attributes with information.",
+        "severity": "MEDIUM",
+        "check_command": "Check container security attribute transmission",
+        "remediation": "Implement security attribute transmission for containers",
+        "test_type": "attribute_check"
+      },
+      {
+        "id": "SC-18",
+        "title": "Mobile Code",
+        "description": "The information system identifies, prohibits, or restricts mobile code.",
+        "severity": "HIGH",
+        "check_command": "Check container mobile code restrictions",
+        "remediation": "Restrict or prohibit mobile code in containers",
+        "test_type": "code_check"
+      },
+      {
+        "id": "SC-20",
+        "title": "Secure Name/Address Resolution Service",
+        "description": "The information system provides name/address resolution service for authorized users.",
+        "severity": "MEDIUM",
+        "check_command": "Check container DNS security",
+        "remediation": "Implement secure DNS for containers",
+        "test_type": "dns_check"
+      },
+      {
+        "id": "SC-21",
+        "title": "Secure Name/Address Resolution Service for Authoritative Sources",
+        "description": "The information system performs name/address resolution for authoritative sources.",
+        "severity": "MEDIUM",
+        "check_command": "Check container authoritative DNS",
+        "remediation": "Use authoritative DNS for containers",
+        "test_type": "dns_check"
+      },
+      {
+        "id": "SC-22",
+        "title": "System and Communications Protection Policy and Procedures",
+        "description": "The information system protects the confidentiality and integrity of transmitted information.",
+        "severity": "HIGH",
+        "check_command": "Check container transmission protection",
+        "remediation": "Implement transmission protection for containers",
+        "test_type": "transmission_check"
+      },
+      {
+        "id": "SC-23",
+        "title": "Session Authenticity",
+        "description": "The information system protects the authenticity of communications sessions.",
+        "severity": "HIGH",
+        "check_command": "Check container session authentication",
+        "remediation": "Implement session authentication for containers",
+        "test_type": "session_check"
+      },
+      {
+        "id": "SC-24",
+        "title": "Fail-Safe Procedures",
+        "description": "The information system fails to a known secure state when system processes fail.",
+        "severity": "MEDIUM",
+        "check_command": "Check container fail-safe procedures",
+        "remediation": "Implement fail-safe procedures for containers",
+        "test_type": "failover_check"
+      },
+      {
+        "id": "SC-28",
+        "title": "Protection of Information at Rest",
+        "description": "The information system protects the confidentiality and integrity of information at rest.",
+        "severity": "HIGH",
+        "check_command": "Check container data-at-rest encryption",
+        "remediation": "Implement encryption for data at rest in containers",
+        "test_type": "encryption_check"
+      },
+      {
+        "id": "SC-30",
+        "title": "Concealment and Misleading Activities",
+        "description": "The information system conceals or misleads unauthorized users.",
+        "severity": "MEDIUM",
+        "check_command": "Check container concealment techniques",
+        "remediation": "Implement concealment techniques for containers",
+        "test_type": "concealment_check"
+      },
+      {
+        "id": "SC-31",
+        "title": "Covert Channel Analysis",
+        "description": "The information system protects against covert channels.",
+        "severity": "LOW",
+        "check_command": "Check container covert channel protection",
+        "remediation": "Implement covert channel protection for containers",
+        "test_type": "covert_check"
+      },
+      {
+        "id": "SC-32",
+        "title": "System Partitioning",
+        "description": "The information system partitions information system resources into separately secured domains.",
+        "severity": "HIGH",
+        "check_command": "Check container system partitioning",
+        "remediation": "Implement system partitioning for containers",
+        "test_type": "partitioning_check"
+      },
+      {
+        "id": "SC-34",
+        "title": "Originating Traffic Control",
+        "description": "The information system allows only authorized traffic to originate from the system.",
+        "severity": "HIGH",
+        "check_command": "Check container outbound traffic control",
+        "remediation": "Implement outbound traffic control for containers",
+        "test_type": "traffic_check"
+      },
+      {
+        "id": "SC-35",
+        "title": "Inbound Traffic Control",
+        "description": "The information system allows only authorized inbound traffic.",
+        "severity": "HIGH",
+        "check_command": "Check container inbound traffic control",
+        "remediation": "Implement inbound traffic control for containers",
+        "test_type": "traffic_check"
+      },
+      {
+        "id": "SC-36",
+        "title": "Distributed Processing",
+        "description": "The information system distributes processing across components.",
+        "severity": "MEDIUM",
+        "check_command": "Check container distributed processing",
+        "remediation": "Implement distributed processing for containers",
+        "test_type": "processing_check"
+      },
+      {
+        "id": "SC-37",
+        "title": "Outbound Connections",
+        "description": "The information system limits outbound connections.",
+        "severity": "HIGH",
+        "check_command": "Check container outbound connection limits",
+        "remediation": "Limit outbound connections from containers",
+        "test_type": "connection_check"
+      },
+      {
+        "id": "SC-39",
+        "title": "Process Isolation",
+        "description": "The information system isolates processes from each other.",
+        "severity": "HIGH",
+        "check_command": "Check container process isolation",
+        "remediation": "Implement process isolation for containers",
+        "test_type": "isolation_check"
+      },
+      {
+        "id": "SC-40",
+        "title": "Wireless Link Protection",
+        "description": "The information system protects wireless links.",
+        "severity": "MEDIUM",
+        "check_command": "Check container wireless link protection",
+        "remediation": "Implement wireless link protection for containers",
+        "test_type": "wireless_check"
+      },
+      {
+        "id": "SC-41",
+        "title": "Port and I/O Device Access",
+        "description": "The information system restricts port and I/O device access.",
+        "severity": "HIGH",
+        "check_command": "Check container port and I/O restrictions",
+        "remediation": "Restrict port and I/O access for containers",
+        "test_type": "port_check"
+      },
+      {
+        "id": "SC-44",
+        "title": "Authenticator Management",
+        "description": "The information system manages authenticators.",
+        "severity": "HIGH",
+        "check_command": "Check container authenticator management",
+        "remediation": "Implement authenticator management for containers",
+        "test_type": "authenticator_check"
+      }
+    ]
+  },
+  "Section 3": {
+    "title": "Container Orchestration Security",
+    "controls": [
+      {
+        "id": "CM-1",
+        "title": "Configuration Management Policy and Procedures",
+        "description": "The organization develops, documents, and disseminates configuration management policy.",
+        "severity": "HIGH",
+        "check_command": "Check container configuration management policies",
+        "remediation": "Develop container configuration management policies",
+        "test_type": "policy_check"
+      },
+      {
+        "id": "CM-2",
+        "title": "Baseline Configuration",
+        "description": "The organization develops, documents, and maintains baseline configurations.",
+        "severity": "HIGH",
+        "check_command": "Check container baseline configurations",
+        "remediation": "Establish baseline configurations for containers",
+        "test_type": "baseline_check"
+      },
+      {
+        "id": "CM-3",
+        "title": "Configuration Change Control",
+        "description": "The organization controls changes to configuration items.",
+        "severity": "HIGH",
+        "check_command": "Check container configuration change control",
+        "remediation": "Implement configuration change control for containers",
+        "test_type": "change_control_check"
+      },
+      {
+        "id": "CM-4",
+        "title": "Security Impact Analysis",
+        "description": "The organization analyzes security impact of changes.",
+        "severity": "HIGH",
+        "check_command": "Check container security impact analysis",
+        "remediation": "Implement security impact analysis for container changes",
+        "test_type": "impact_check"
+      },
+      {
+        "id": "CM-5",
+        "title": "Access Restrictions for Change",
+        "description": "The organization restricts access to configuration items.",
+        "severity": "HIGH",
+        "check_command": "Check container configuration access restrictions",
+        "remediation": "Restrict access to container configurations",
+        "test_type": "access_check"
+      },
+      {
+        "id": "CM-6",
+        "title": "Configuration Settings",
+        "description": "The organization configures security settings.",
+        "severity": "HIGH",
+        "check_command": "Check container security configuration settings",
+        "remediation": "Configure appropriate security settings for containers",
+        "test_type": "config_check"
+      },
+      {
+        "id": "CM-7",
+        "title": "Least Functionality",
+        "description": "The organization disables or removes unnecessary functions.",
+        "severity": "HIGH",
+        "check_command": "Check container least functionality",
+        "remediation": "Implement least functionality in containers",
+        "test_type": "functionality_check"
+      },
+      {
+        "id": "CM-8",
+        "title": "Information System Component Inventory",
+        "description": "The organization maintains an inventory of information system components.",
+        "severity": "MEDIUM",
+        "check_command": "Check container component inventory",
+        "remediation": "Maintain inventory of container components",
+        "test_type": "inventory_check"
+      },
+      {
+        "id": "CM-9",
+        "title": "Configuration Management Plan",
+        "description": "The organization develops and implements a configuration management plan.",
+        "severity": "MEDIUM",
+        "check_command": "Check container configuration management plan",
+        "remediation": "Develop container configuration management plan",
+        "test_type": "plan_check"
+      },
+      {
+        "id": "CM-10",
+        "title": "Software Usage Restrictions",
+        "description": "The organization restricts software usage.",
+        "severity": "HIGH",
+        "check_command": "Check container software usage restrictions",
+        "remediation": "Implement software usage restrictions for containers",
+        "test_type": "software_check"
+      },
+      {
+        "id": "CM-11",
+        "title": "User-Installed Software",
+        "description": "The organization controls user-installed software.",
+        "severity": "HIGH",
+        "check_command": "Check container user-installed software control",
+        "remediation": "Control user-installed software in containers",
+        "test_type": "software_check"
+      },
+      {
+        "id": "CM-12",
+        "title": "Information System Component Inventory",
+        "description": "The organization maintains an inventory of information system components.",
+        "severity": "MEDIUM",
+        "check_command": "Check container component inventory",
+        "remediation": "Maintain inventory of container components",
+        "test_type": "inventory_check"
+      }
+    ]
+  },
+  "Section 4": {
+    "title": "Container Monitoring and Logging",
+    "controls": [
+      {
+        "id": "AU-1",
+        "title": "Audit and Accountability Policy and Procedures",
+        "description": "The organization develops, documents, and disseminates audit policy.",
+        "severity": "HIGH",
+        "check_command": "Check container audit policies",
+        "remediation": "Develop container audit policies",
+        "test_type": "policy_check"
+      },
+      {
+        "id": "AU-2",
+        "title": "Audit Events",
+        "description": "The information system generates audit records.",
+        "severity": "HIGH",
+        "check_command": "Check container audit event generation",
+        "remediation": "Implement audit event generation for containers",
+        "test_type": "audit_check"
+      },
+      {
+        "id": "AU-3",
+        "title": "Content of Audit Records",
+        "description": "The organization includes audit record content.",
+        "severity": "HIGH",
+        "check_command": "Check container audit record content",
+        "remediation": "Implement appropriate audit record content for containers",
+        "test_type": "audit_check"
+      },
+      {
+        "id": "AU-4",
+        "title": "Audit Storage Capacity",
+        "description": "The information system provides sufficient audit storage capacity.",
+        "severity": "MEDIUM",
+        "check_command": "Check container audit storage capacity",
+        "remediation": "Ensure sufficient audit storage for containers",
+        "test_type": "storage_check"
+      },
+      {
+        "id": "AU-5",
+        "title": "Response to Audit Processing Failures",
+        "description": "The information system responds to audit processing failures.",
+        "severity": "MEDIUM",
+        "check_command": "Check container audit failure response",
+        "remediation": "Implement audit failure response for containers",
+        "test_type": "failure_check"
+      },
+      {
+        "id": "AU-6",
+        "title": "Audit Review, Analysis, and Reporting",
+        "description": "The organization reviews and analyzes audit records.",
+        "severity": "HIGH",
+        "check_command": "Check container audit review and analysis",
+        "remediation": "Implement audit review and analysis for containers",
+        "test_type": "audit_check"
+      },
+      {
+        "id": "AU-7",
+        "title": "Audit Reduction and Report Generation",
+        "description": "The information system provides audit reduction and report generation.",
+        "severity": "MEDIUM",
+        "check_command": "Check container audit reduction and reporting",
+        "remediation": "Implement audit reduction and reporting for containers",
+        "test_type": "audit_check"
+      },
+      {
+        "id": "AU-8",
+        "title": "Time Stamps",
+        "description": "The information system uses time stamps for audit records.",
+        "severity": "HIGH",
+        "check_command": "Check container audit time stamps",
+        "remediation": "Implement time stamps for container audit records",
+        "test_type": "timestamp_check"
+      },
+      {
+        "id": "AU-9",
+        "title": "Protection of Audit Information",
+        "description": "The information system protects audit information.",
+        "severity": "HIGH",
+        "check_command": "Check container audit information protection",
+        "remediation": "Protect container audit information",
+        "test_type": "protection_check"
+      },
+      {
+        "id": "AU-10",
+        "title": "Non-Repudiation",
+        "description": "The information system provides non-repudiation.",
+        "severity": "HIGH",
+        "check_command": "Check container non-repudiation",
+        "remediation": "Implement non-repudiation for containers",
+        "test_type": "nonrepudiation_check"
+      },
+      {
+        "id": "AU-11",
+        "title": "Audit Record Retention",
+        "description": "The organization retains audit records.",
+        "severity": "HIGH",
+        "check_command": "Check container audit record retention",
+        "remediation": "Implement audit record retention for containers",
+        "test_type": "retention_check"
+      },
+      {
+        "id": "AU-12",
+        "title": "Audit Generation",
+        "description": "The information system generates audit records.",
+        "severity": "HIGH",
+        "check_command": "Check container audit generation",
+        "remediation": "Implement audit generation for containers",
+        "test_type": "audit_check"
+      },
+      {
+        "id": "AU-13",
+        "title": "Monitoring for Unauthorized Disclosure",
+        "description": "The organization monitors for unauthorized disclosure.",
+        "severity": "HIGH",
+        "check_command": "Check container disclosure monitoring",
+        "remediation": "Implement disclosure monitoring for containers",
+        "test_type": "monitoring_check"
+      },
+      {
+        "id": "AU-14",
+        "title": "Session Audit",
+        "description": "The information system audits session establishment.",
+        "severity": "HIGH",
+        "check_command": "Check container session auditing",
+        "remediation": "Implement session auditing for containers",
+        "test_type": "session_check"
+      },
+      {
+        "id": "AU-15",
+        "title": "Alternate Audit Capability",
+        "description": "The information system provides alternate audit capability.",
+        "severity": "MEDIUM",
+        "check_command": "Check container alternate audit capability",
+        "remediation": "Implement alternate audit capability for containers",
+        "test_type": "audit_check"
+      },
+      {
+        "id": "AU-16",
+        "title": "Cross-Discipline Audit Sharing",
+        "description": "The organization shares audit information across disciplines.",
+        "severity": "LOW",
+        "check_command": "Check container cross-discipline audit sharing",
+        "remediation": "Implement cross-discipline audit sharing for containers",
+        "test_type": "sharing_check"
+      }
+    ]
+  },
+  "Section 5": {
+    "title": "Container Incident Response",
+    "controls": [
+      {
+        "id": "IR-1",
+        "title": "Incident Response Policy and Procedures",
+        "description": "The organization develops, documents, and disseminates incident response policy.",
+        "severity": "HIGH",
+        "check_command": "Check container incident response policies",
+        "remediation": "Develop container incident response policies",
+        "test_type": "policy_check"
+      },
+      {
+        "id": "IR-2",
+        "title": "Incident Response Training",
+        "description": "The organization provides incident response training.",
+        "severity": "MEDIUM",
+        "check_command": "Check container incident response training",
+        "remediation": "Provide incident response training for containers",
+        "test_type": "training_check"
+      },
+      {
+        "id": "IR-3",
+        "title": "Incident Response Testing",
+        "description": "The organization tests incident response capabilities.",
+        "severity": "MEDIUM",
+        "check_command": "Check container incident response testing",
+        "remediation": "Test incident response capabilities for containers",
+        "test_type": "testing_check"
+      },
+      {
+        "id": "IR-4",
+        "title": "Incident Handling",
+        "description": "The organization handles incidents.",
+        "severity": "HIGH",
+        "check_command": "Check container incident handling",
+        "remediation": "Implement incident handling for containers",
+        "test_type": "incident_check"
+      },
+      {
+        "id": "IR-5",
+        "title": "Incident Monitoring",
+        "description": "The organization monitors incidents.",
+        "severity": "HIGH",
+        "check_command": "Check container incident monitoring",
+        "remediation": "Implement incident monitoring for containers",
+        "test_type": "monitoring_check"
+      },
+      {
+        "id": "IR-6",
+        "title": "Incident Reporting",
+        "description": "The organization reports incidents.",
+        "severity": "HIGH",
+        "check_command": "Check container incident reporting",
+        "remediation": "Implement incident reporting for containers",
+        "test_type": "reporting_check"
+      },
+      {
+        "id": "IR-7",
+        "title": "Incident Response Support",
+        "description": "The organization provides incident response support.",
+        "severity": "MEDIUM",
+        "check_command": "Check container incident response support",
+        "remediation": "Provide incident response support for containers",
+        "test_type": "support_check"
+      },
+      {
+        "id": "IR-8",
+        "title": "Incident Response Plan",
+        "description": "The organization develops an incident response plan.",
+        "severity": "HIGH",
+        "check_command": "Check container incident response plan",
+        "remediation": "Develop incident response plan for containers",
+        "test_type": "plan_check"
+      }
+    ]
+  }
+}

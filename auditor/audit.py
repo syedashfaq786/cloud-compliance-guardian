@@ -138,6 +138,7 @@ def run_audit(
     endpoint: Optional[str] = None,
     model: Optional[str] = None,
     backend: Optional[str] = None,
+    framework: str = "CIS",
     triggered_by: str = "cli",
     pr_url: Optional[str] = None,
     store_results: bool = True,
@@ -149,6 +150,7 @@ def run_audit(
         endpoint: Sec-8B model endpoint (uses env var if not provided)
         model: Model name (uses env var if not provided)
         backend: 'ollama' or 'vllm' (uses env var if not provided)
+        framework: Compliance framework (CIS | NIST | CCM)
         triggered_by: What triggered this audit (cli, pr, api, scheduled)
         pr_url: Associated PR URL (if triggered from GitHub)
         store_results: Whether to persist results in the database
@@ -164,6 +166,9 @@ def run_audit(
         directory=directory,
         timestamp=timestamp,
     )
+    selected_framework = (framework or "CIS").upper()
+    if selected_framework not in {"CIS", "NIST", "CCM"}:
+        selected_framework = "CIS"
 
     # ── Step 1: Parse Terraform files ─────────────────────────────────────
     try:
@@ -181,6 +186,36 @@ def run_audit(
     if not parse_result.resources:
         report.status = "completed"
         report.compliance_score = 100.0
+        report.severity_counts = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0}
+        if store_results:
+            try:
+                init_db()
+                session = get_session()
+                save_audit(session, {
+                    "audit_id": audit_id,
+                    "directory": directory,
+                    "files_scanned": report.files_scanned,
+                    "resources_scanned": report.resources_scanned,
+                    "total_findings": 0,
+                    "critical_count": 0,
+                    "high_count": 0,
+                    "medium_count": 0,
+                    "low_count": 0,
+                    "compliance_score": 100.0,
+                    "status": "completed",
+                    "triggered_by": triggered_by,
+                    "pr_url": pr_url,
+                    "metadata_json": {
+                        "domain": "terraform",
+                        "target": "terraform",
+                        "framework": selected_framework,
+                        "mode": "directory",
+                    },
+                    "findings": [],
+                })
+                session.close()
+            except Exception:
+                pass
         return report
 
     # ── Step 2: Run rule-based audit engine ─────────────────────────────
@@ -200,8 +235,15 @@ def run_audit(
     # ── Step 3: Calculate score and counts ─────────────────────────────────
     report.compliance_score = summary["compliance_score"]
     report.severity_counts = summary["severity_counts"]
-    # Include ALL findings (both PASS and FAIL) for detailed reporting
-    report.findings = [f.to_dict() for f in rule_findings]
+    findings_data = [f.to_dict() for f in rule_findings]
+    if selected_framework == "CIS":
+        for f in findings_data:
+            f.setdefault("framework", "CIS")
+            f.setdefault("rule_id", f.get("cis_rule_id") or f.get("rule_id", ""))
+        report.findings = findings_data
+    else:
+        from .framework_mapping import translate_findings_to_framework
+        report.findings = translate_findings_to_framework(findings_data, selected_framework)
 
     # ── Step 5: Store in database ─────────────────────────────────────────
     if store_results:
@@ -222,6 +264,12 @@ def run_audit(
                 "status": "completed",
                 "triggered_by": triggered_by,
                 "pr_url": pr_url,
+                "metadata_json": {
+                    "domain": "terraform",
+                    "target": "terraform",
+                    "framework": selected_framework,
+                    "mode": "directory",
+                },
                 "findings": report.findings,
             })
             session.close()

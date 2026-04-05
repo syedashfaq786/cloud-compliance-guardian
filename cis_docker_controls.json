@@ -1,0 +1,725 @@
+{
+  "Section 1": {
+    "title": "Host Configuration",
+    "controls": [
+      {
+        "id": "1.1.1",
+        "title": "Ensure a separate partition for containers",
+        "description": "All Docker containers and their data should be stored on a separate partition from the host system.",
+        "severity": "MEDIUM",
+        "check_command": "docker info | grep -i 'docker root dir'",
+        "remediation": "Configure Docker to use a separate partition for container storage.",
+        "test_type": "docker_info"
+      },
+      {
+        "id": "1.1.2",
+        "title": "Ensure the container host has been Hardened",
+        "description": "The container host system should be hardened according to general security best practices.",
+        "severity": "HIGH",
+        "check_command": "Check host security configurations",
+        "remediation": "Follow host hardening best practices.",
+        "test_type": "host_check"
+      },
+      {
+        "id": "1.2.1",
+        "title": "Ensure Docker package is up to date",
+        "description": "Keep Docker package up to date to avoid security vulnerabilities.",
+        "severity": "MEDIUM",
+        "check_command": "docker version",
+        "remediation": "Update Docker package to latest stable version.",
+        "test_type": "docker_version"
+      },
+      {
+        "id": "1.3.1",
+        "title": "Ensure aufs storage driver is not used",
+        "description": "aufs storage driver is not recommended for production use.",
+        "severity": "LOW",
+        "check_command": "docker info | grep -i 'storage driver'",
+        "remediation": "Use overlay2 or another recommended storage driver.",
+        "test_type": "docker_info"
+      },
+      {
+        "id": "1.4.1",
+        "title": "Ensure Content Trust for Docker is Enabled",
+        "description": "Content trust provides the ability to verify image integrity and authenticity.",
+        "severity": "HIGH",
+        "check_command": "echo $DOCKER_CONTENT_TRUST",
+        "remediation": "Export DOCKER_CONTENT_TRUST=1 before running Docker commands.",
+        "test_type": "env_var"
+      },
+      {
+        "id": "1.5.1",
+        "title": "Ensure live restore is Enabled",
+        "description": "Live restore helps to keep containers running during Docker daemon downtime.",
+        "severity": "MEDIUM",
+        "check_command": "docker info | grep 'Live Restore Enabled'",
+        "remediation": "Add \"live-restore\": true to /etc/docker/daemon.json.",
+        "test_type": "docker_info"
+      },
+      {
+        "id": "1.6.1",
+        "title": "Ensure Userland Proxy is Disabled",
+        "description": "Userland proxy can be disabled to reduce attack surface.",
+        "severity": "LOW",
+        "check_command": "docker info | grep 'userland-proxy'",
+        "remediation": "Add \"userland-proxy\": false to /etc/docker/daemon.json.",
+        "test_type": "docker_info"
+      },
+      {
+        "id": "1.7.1",
+        "title": "Ensure daemon-wide custom seccomp profile is applied",
+        "description": "Default seccomp profile should be used or custom profile should be applied.",
+        "severity": "MEDIUM",
+        "check_command": "docker info | grep 'Default Seccomp Profile'",
+        "remediation": "Use default seccomp profile or apply custom profile.",
+        "test_type": "docker_info"
+      }
+    ]
+  },
+  "Section 2": {
+    "title": "Docker Daemon Configuration",
+    "controls": [
+      {
+        "id": "2.1.1",
+        "title": "Ensure network traffic is restricted between containers",
+        "description": "By default, all containers on the same Docker network can communicate with each other.",
+        "severity": "MEDIUM",
+        "check_command": "docker network ls",
+        "remediation": "Configure network segmentation and use appropriate network drivers.",
+        "test_type": "docker_network"
+      },
+      {
+        "id": "2.2.1",
+        "title": "Ensure the logging level is set to 'info'",
+        "description": "Setting appropriate logging level helps in monitoring and debugging.",
+        "severity": "LOW",
+        "check_command": "docker info | grep 'Logging Driver'",
+        "remediation": "Configure appropriate logging driver in daemon.json.",
+        "test_type": "docker_info"
+      },
+      {
+        "id": "2.3.1",
+        "title": "Ensure Docker is allowed to make changes to iptables",
+        "description": "Docker needs iptables access for networking functionality.",
+        "severity": "MEDIUM",
+        "check_command": "docker info | grep 'iptables'",
+        "remediation": "Ensure Docker has appropriate iptables permissions.",
+        "test_type": "docker_info"
+      },
+      {
+        "id": "2.4.1",
+        "title": "Ensure insecure registries are not used",
+        "description": "Insecure registries should not be used in production environments.",
+        "severity": "HIGH",
+        "check_command": "docker info | grep 'Insecure Registries'",
+        "remediation": "Remove insecure registries from daemon.json configuration.",
+        "test_type": "docker_info"
+      },
+      {
+        "id": "2.5.1",
+        "title": "Ensure aufs storage driver is not used",
+        "description": "Same as 1.3.1 - aufs is not recommended.",
+        "severity": "LOW",
+        "check_command": "docker info | grep 'Storage Driver'",
+        "remediation": "Use overlay2 storage driver.",
+        "test_type": "docker_info"
+      }
+    ]
+  },
+  "Section 3": {
+    "title": "Container Runtime and Network Security",
+    "controls": [
+      {
+        "id": "3.1.1",
+        "title": "Ensure Docker socket is not mounted inside any containers",
+        "description": "Docker socket should not be mounted inside containers as it provides full host access.",
+        "severity": "HIGH",
+        "check_command": "docker inspect --format='{{.Mounts}}' <container_id>",
+        "remediation": "Remove Docker socket mounts from container configurations.",
+        "test_type": "container_inspect"
+      },
+      {
+        "id": "3.2.1",
+        "title": "Ensure host's network namespace is not shared",
+        "description": "Containers should not share host's network namespace unless required.",
+        "severity": "HIGH",
+        "check_command": "docker inspect --format='{{.HostConfig.NetworkMode}}' <container_id>",
+        "remediation": "Use bridge networking mode instead of host networking.",
+        "test_type": "container_inspect"
+      },
+      {
+        "id": "3.3.1",
+        "title": "Ensure memory usage for container is limited",
+        "description": "Containers should have memory limits to prevent resource exhaustion.",
+        "severity": "MEDIUM",
+        "check_command": "docker inspect --format='{{.HostConfig.Memory}}' <container_id>",
+        "remediation": "Set memory limits using --memory flag.",
+        "test_type": "container_inspect"
+      },
+      {
+        "id": "3.4.1",
+        "title": "Ensure CPU priority is set appropriately on container",
+        "description": "CPU limits should be set to prevent resource starvation.",
+        "severity": "MEDIUM",
+        "check_command": "docker inspect --format='{{.HostConfig.CpuShares}}' <container_id>",
+        "remediation": "Set CPU limits using --cpu-shares flag.",
+        "test_type": "container_inspect"
+      },
+      {
+        "id": "3.5.1",
+        "title": "Ensure container's root filesystem is mounted as read-only",
+        "description": "Container filesystem should be read-only where possible.",
+        "severity": "MEDIUM",
+        "check_command": "docker inspect --format='{{.HostConfig.ReadonlyRootfs}}' <container_id>",
+        "remediation": "Use --read-only flag when running containers.",
+        "test_type": "container_inspect"
+      },
+      {
+        "id": "3.6.1",
+        "title": "Ensure incoming container traffic is bounded",
+        "description": "Container ports should be explicitly bound to specific interfaces.",
+        "severity": "MEDIUM",
+        "check_command": "docker inspect --format='{{.NetworkSettings.Ports}}' <container_id>",
+        "remediation": "Bind ports to specific interfaces instead of 0.0.0.0.",
+        "test_type": "container_inspect"
+      },
+      {
+        "id": "3.7.1",
+        "title": "Ensure 'on-failure' container restart policy is set to '5'",
+        "description": "Container restart policy should be appropriately configured.",
+        "severity": "LOW",
+        "check_command": "docker inspect --format='{{.HostConfig.RestartPolicy}}' <container_id>",
+        "remediation": "Set appropriate restart policy using --restart flag.",
+        "test_type": "container_inspect"
+      },
+      {
+        "id": "3.8.1",
+        "title": "Ensure host's UID/GID mappings are not used",
+        "description": "Container should not use host's UID/GID mappings.",
+        "severity": "MEDIUM",
+        "check_command": "docker inspect --format='{{.HostConfig.UsernsMode}}' <container_id>",
+        "remediation": "Use user namespaces for container isolation.",
+        "test_type": "container_inspect"
+      },
+      {
+        "id": "3.9.1",
+        "title": "Ensure container is restricted from acquiring new privileges",
+        "description": "Containers should not be allowed to acquire new privileges.",
+        "severity": "HIGH",
+        "check_command": "docker inspect --format='{{.HostConfig.Privileged}}' <container_id>",
+        "remediation": "Use --no-new-privileges flag.",
+        "test_type": "container_inspect"
+      },
+      {
+        "id": "3.10.1",
+        "title": "Ensure sensitive host system directories are not mounted on containers",
+        "description": "Sensitive host directories should not be mounted in containers.",
+        "severity": "HIGH",
+        "check_command": "docker inspect --format='{{.Mounts}}' <container_id>",
+        "remediation": "Remove sensitive host directory mounts.",
+        "test_type": "container_inspect"
+      },
+      {
+        "id": "3.11.1",
+        "title": "Ensure sshd is not running within any container",
+        "description": "SSH daemon should not run inside containers.",
+        "severity": "MEDIUM",
+        "check_command": "docker exec <container_id> ps aux | grep sshd",
+        "remediation": "Remove SSH daemon from container images.",
+        "test_type": "container_exec"
+      },
+      {
+        "id": "3.12.1",
+        "title": "Ensure privileged containers are not used",
+        "description": "Privileged containers should be avoided.",
+        "severity": "HIGH",
+        "check_command": "docker inspect --format='{{.HostConfig.Privileged}}' <container_id>",
+        "remediation": "Remove --privileged flag from container configurations.",
+        "test_type": "container_inspect"
+      },
+      {
+        "id": "3.13.1",
+        "title": "Ensure sensitive files are not included within container images",
+        "description": "Container images should not contain sensitive files.",
+        "severity": "HIGH",
+        "check_command": "docker history <image_id>",
+        "remediation": "Remove sensitive files from Docker images.",
+        "test_type": "image_inspect"
+      },
+      {
+        "id": "3.14.1",
+        "title": "Ensure 'docker' group membership is carefully managed",
+        "description": "Docker group membership should be restricted to trusted users.",
+        "severity": "HIGH",
+        "check_command": "getent group docker",
+        "remediation": "Restrict docker group membership to authorized users only.",
+        "test_type": "host_check"
+      },
+      {
+        "id": "3.15.1",
+        "title": "Ensure container health is checked at startup",
+        "description": "Container health checks should be configured.",
+        "severity": "LOW",
+        "check_command": "docker inspect --format='{{.Config.Healthcheck}}' <container_id>",
+        "remediation": "Add health checks to container configurations.",
+        "test_type": "container_inspect"
+      },
+      {
+        "id": "3.16.1",
+        "title": "Ensure containers use non-root user accounts",
+        "description": "Containers should run as non-root users.",
+        "severity": "HIGH",
+        "check_command": "docker inspect --format='{{.Config.User}}' <container_id>",
+        "remediation": "Configure containers to run as non-root users.",
+        "test_type": "container_inspect"
+      },
+      {
+        "id": "3.17.1",
+        "title": "Ensure containers are limited to essential capabilities",
+        "description": "Container capabilities should be limited to only what's needed.",
+        "severity": "HIGH",
+        "check_command": "docker inspect --format='{{.HostConfig.CapDrop}}' <container_id>",
+        "remediation": "Drop unnecessary capabilities using --cap-drop.",
+        "test_type": "container_inspect"
+      },
+      {
+        "id": "3.18.1",
+        "title": "Ensure seccomp profile is applied, if needed",
+        "description": "Seccomp profiles should be applied to restrict system calls.",
+        "severity": "MEDIUM",
+        "check_command": "docker inspect --format='{{.HostConfig.SecurityOpt}}' <container_id>",
+        "remediation": "Apply appropriate seccomp profiles.",
+        "test_type": "container_inspect"
+      },
+      {
+        "id": "3.19.1",
+        "title": "Ensure AppArmor profile is applied, if needed",
+        "description": "AppArmor profiles should be applied for additional security.",
+        "severity": "MEDIUM",
+        "check_command": "docker inspect --format='{{.HostConfig.SecurityOpt}}' <container_id>",
+        "remediation": "Apply AppArmor profiles to containers.",
+        "test_type": "container_inspect"
+      },
+      {
+        "id": "3.20.1",
+        "title": "Ensure SELinux security options are set, if applicable",
+        "description": "SELinux should be configured for container security.",
+        "severity": "MEDIUM",
+        "check_command": "docker inspect --format='{{.HostConfig.SecurityOpt}}' <container_id>",
+        "remediation": "Configure SELinux security options.",
+        "test_type": "container_inspect"
+      }
+    ]
+  },
+  "Section 4": {
+    "title": "Container Security Standards",
+    "controls": [
+      {
+        "id": "4.1.1",
+        "title": "Ensure user namespace support is not disabled",
+        "description": "User namespaces provide additional isolation.",
+        "severity": "MEDIUM",
+        "check_command": "docker info | grep 'userns'",
+        "remediation": "Enable user namespace support.",
+        "test_type": "docker_info"
+      },
+      {
+        "id": "4.2.1",
+        "title": "Ensure daemon-wide custom seccomp profile is applied",
+        "description": "Custom seccomp profiles should be applied at daemon level.",
+        "severity": "MEDIUM",
+        "check_command": "docker info | grep 'seccomp'",
+        "remediation": "Configure custom seccomp profile in daemon.json.",
+        "test_type": "docker_info"
+      },
+      {
+        "id": "4.3.1",
+        "title": "Ensure authentication is enabled for remote Docker daemon",
+        "description": "Remote Docker daemon access should be authenticated.",
+        "severity": "HIGH",
+        "check_command": "docker info | grep 'Remote API'",
+        "remediation": "Enable TLS authentication for remote access.",
+        "test_type": "docker_info"
+      },
+      {
+        "id": "4.4.1",
+        "title": "Ensure authorization is enabled for remote Docker daemon",
+        "description": "Authorization plugins should be enabled for remote access.",
+        "severity": "HIGH",
+        "check_command": "docker info | grep 'Authorization'",
+        "remediation": "Configure authorization plugins.",
+        "test_type": "docker_info"
+      },
+      {
+        "id": "4.5.1",
+        "title": "Ensure centralized and remote logging is enabled",
+        "description": "Container logs should be sent to centralized logging system.",
+        "severity": "MEDIUM",
+        "check_command": "docker info | grep 'Logging Driver'",
+        "remediation": "Configure centralized logging driver.",
+        "test_type": "docker_info"
+      },
+      {
+        "id": "4.6.1",
+        "title": "Ensure containers are running only the required applications",
+        "description": "Containers should run minimal required applications.",
+        "severity": "LOW",
+        "check_command": "docker exec <container_id> ps aux",
+        "remediation": "Remove unnecessary applications from containers.",
+        "test_type": "container_exec"
+      },
+      {
+        "id": "4.7.1",
+        "title": "Ensure the latest Docker version is installed",
+        "description": "Latest Docker version should be installed.",
+        "severity": "MEDIUM",
+        "check_command": "docker version",
+        "remediation": "Update to latest Docker version.",
+        "test_type": "docker_version"
+      },
+      {
+        "id": "4.8.1",
+        "title": "Ensure Docker commands are executed through a non-root user",
+        "description": "Docker commands should be executed by non-root users.",
+        "severity": "MEDIUM",
+        "check_command": "whoami",
+        "remediation": "Use non-root user for Docker operations.",
+        "test_type": "host_check"
+      },
+      {
+        "id": "4.9.1",
+        "title": "Ensure Docker socket file permissions are set to 660 or more restrictive",
+        "description": "Docker socket should have restrictive permissions.",
+        "severity": "HIGH",
+        "check_command": "ls -l /var/run/docker.sock",
+        "remediation": "Set appropriate permissions on Docker socket.",
+        "test_type": "host_check"
+      },
+      {
+        "id": "4.10.1",
+        "title": "Ensure Docker daemon configuration file permissions are set to 644 or more restrictive",
+        "description": "Docker daemon config should have restrictive permissions.",
+        "severity": "HIGH",
+        "check_command": "ls -l /etc/docker/daemon.json",
+        "remediation": "Set appropriate permissions on daemon configuration.",
+        "test_type": "host_check"
+      },
+      {
+        "id": "4.11.1",
+        "title": "Ensure Docker daemon service file permissions are set to 644 or more restrictive",
+        "description": "Docker service file should have restrictive permissions.",
+        "severity": "HIGH",
+        "check_command": "ls -l /etc/systemd/system/docker.service",
+        "remediation": "Set appropriate permissions on service file.",
+        "test_type": "host_check"
+      },
+      {
+        "id": "4.12.1",
+        "title": "Ensure Docker registry certificate file permissions are set to 444 or more restrictive",
+        "description": "Registry certificates should have restrictive permissions.",
+        "severity": "HIGH",
+        "check_command": "ls -l /etc/docker/certs.d/*",
+        "remediation": "Set appropriate permissions on certificate files.",
+        "test_type": "host_check"
+      },
+      {
+        "id": "4.13.1",
+        "title": "Ensure TLS CA certificate file permissions are set to 444 or more restrictive",
+        "description": "TLS CA certificates should have restrictive permissions.",
+        "severity": "HIGH",
+        "check_command": "ls -l /etc/docker/certs.d/*/*.ca",
+        "remediation": "Set appropriate permissions on CA certificates.",
+        "test_type": "host_check"
+      },
+      {
+        "id": "4.14.1",
+        "title": "Ensure Docker server certificate file permissions are set to 444 or more restrictive",
+        "description": "Docker server certificates should have restrictive permissions.",
+        "severity": "HIGH",
+        "check_command": "ls -l /etc/docker/certs.d/*/*.cert",
+        "remediation": "Set appropriate permissions on server certificates.",
+        "test_type": "host_check"
+      },
+      {
+        "id": "4.15.1",
+        "title": "Ensure Docker server key file permissions are set to 400",
+        "description": "Docker server keys should have very restrictive permissions.",
+        "severity": "HIGH",
+        "check_command": "ls -l /etc/docker/certs.d/*/*.key",
+        "remediation": "Set appropriate permissions on private key files.",
+        "test_type": "host_check"
+      },
+      {
+        "id": "4.16.1",
+        "title": "Ensure Docker socket ownership is set to root:docker",
+        "description": "Docker socket should be owned by root:docker group.",
+        "severity": "HIGH",
+        "check_command": "ls -l /var/run/docker.sock",
+        "remediation": "Set correct ownership for Docker socket.",
+        "test_type": "host_check"
+      },
+      {
+        "id": "4.17.1",
+        "title": "Ensure Docker daemon configuration file ownership is set to root:root",
+        "description": "Docker daemon config should be owned by root:root.",
+        "severity": "HIGH",
+        "check_command": "ls -l /etc/docker/daemon.json",
+        "remediation": "Set correct ownership for daemon configuration.",
+        "test_type": "host_check"
+      },
+      {
+        "id": "4.18.1",
+        "title": "Ensure Docker daemon service file ownership is set to root:root",
+        "description": "Docker service file should be owned by root:root.",
+        "severity": "HIGH",
+        "check_command": "ls -l /etc/systemd/system/docker.service",
+        "remediation": "Set correct ownership for service file.",
+        "test_type": "host_check"
+      },
+      {
+        "id": "4.19.1",
+        "title": "Ensure Docker registry certificate file ownership is set to root:root",
+        "description": "Registry certificates should be owned by root:root.",
+        "severity": "HIGH",
+        "check_command": "ls -l /etc/docker/certs.d/*",
+        "remediation": "Set correct ownership for certificate files.",
+        "test_type": "host_check"
+      },
+      {
+        "id": "4.20.1",
+        "title": "Ensure TLS CA certificate file ownership is set to root:root",
+        "description": "TLS CA certificates should be owned by root:root.",
+        "severity": "HIGH",
+        "check_command": "ls -l /etc/docker/certs.d/*/*.ca",
+        "remediation": "Set correct ownership for CA certificates.",
+        "test_type": "host_check"
+      },
+      {
+        "id": "4.21.1",
+        "title": "Ensure Docker server certificate file ownership is set to root:root",
+        "description": "Docker server certificates should be owned by root:root.",
+        "severity": "HIGH",
+        "check_command": "ls -l /etc/docker/certs.d/*/*.cert",
+        "remediation": "Set correct ownership for server certificates.",
+        "test_type": "host_check"
+      },
+      {
+        "id": "4.22.1",
+        "title": "Ensure Docker server key file ownership is set to root:root",
+        "description": "Docker server keys should be owned by root:root.",
+        "severity": "HIGH",
+        "check_command": "ls -l /etc/docker/certs.d/*/*.key",
+        "remediation": "Set correct ownership for private key files.",
+        "test_type": "host_check"
+      }
+    ]
+  },
+  "Section 5": {
+    "title": "Container Image and Build File Security",
+    "controls": [
+      {
+        "id": "5.1.1",
+        "title": "Ensure Docker Content Trust (DCT) is enabled",
+        "description": "Docker Content Trust should be enabled for image verification.",
+        "severity": "HIGH",
+        "check_command": "echo $DOCKER_CONTENT_TRUST",
+        "remediation": "Export DOCKER_CONTENT_TRUST=1.",
+        "test_type": "env_var"
+      },
+      {
+        "id": "5.2.1",
+        "title": "Ensure health check instructions are included in container images",
+        "description": "Container images should include health check instructions.",
+        "severity": "LOW",
+        "check_command": "docker inspect --format='{{.Config.Healthcheck}}' <image_id>",
+        "remediation": "Add HEALTHCHECK instruction in Dockerfile.",
+        "test_type": "image_inspect"
+      },
+      {
+        "id": "5.3.1",
+        "title": "Ensure minimal base images are used",
+        "description": "Use minimal base images to reduce attack surface.",
+        "severity": "MEDIUM",
+        "check_command": "docker history <image_id>",
+        "remediation": "Use minimal base images like alpine or distroless.",
+        "test_type": "image_inspect"
+      },
+      {
+        "id": "5.4.1",
+        "title": "Ensure update instructions are not included in container images",
+        "description": "Update instructions should not be in container images.",
+        "severity": "LOW",
+        "check_command": "docker history <image_id>",
+        "remediation": "Remove update instructions from Dockerfile.",
+        "test_type": "image_inspect"
+      },
+      {
+        "id": "5.5.1",
+        "title": "Ensure sensitive information is not included in container images",
+        "description": "Sensitive information should not be in container images.",
+        "severity": "HIGH",
+        "check_command": "docker history <image_id>",
+        "remediation": "Remove sensitive information from images.",
+        "test_type": "image_inspect"
+      },
+      {
+        "id": "5.6.1",
+        "title": "Ensure 'ADD' instruction is not used in container images",
+        "description": "Use COPY instead of ADD for better security.",
+        "severity": "LOW",
+        "check_command": "docker history <image_id>",
+        "remediation": "Replace ADD with COPY in Dockerfile.",
+        "test_type": "image_inspect"
+      },
+      {
+        "id": "5.7.1",
+        "title": "Ensure 'sudo' is not used in container images",
+        "description": "Avoid using sudo in container images.",
+        "severity": "MEDIUM",
+        "check_command": "docker history <image_id>",
+        "remediation": "Remove sudo usage from Dockerfile.",
+        "test_type": "image_inspect"
+      },
+      {
+        "id": "5.8.1",
+        "title": "Ensure 'su' command is not used in container images",
+        "description": "Avoid using su command in container images.",
+        "severity": "MEDIUM",
+        "check_command": "docker history <image_id>",
+        "remediation": "Remove su usage from Dockerfile.",
+        "test_type": "image_inspect"
+      },
+      {
+        "id": "5.9.1",
+        "title": "Ensure setuid and setgid permissions are removed in container images",
+        "description": "Remove unnecessary setuid/setgid permissions.",
+        "severity": "MEDIUM",
+        "check_command": "docker exec <container_id> find / -perm /6000 -type f",
+        "remediation": "Remove setuid/setgid permissions from images.",
+        "test_type": "container_exec"
+      },
+      {
+        "id": "5.10.1",
+        "title": "Ensure shadow file is not present in container images",
+        "description": "Shadow file should not be present in container images.",
+        "severity": "HIGH",
+        "check_command": "docker exec <container_id> ls -l /etc/shadow",
+        "remediation": "Remove shadow file from container images.",
+        "test_type": "container_exec"
+      },
+      {
+        "id": "5.11.1",
+        "title": "Ensure 'root' password is not set in container images",
+        "description": "Root password should not be set in container images.",
+        "severity": "HIGH",
+        "check_command": "docker exec <container_id> grep 'root' /etc/shadow",
+        "remediation": "Remove root password from container images.",
+        "test_type": "container_exec"
+      },
+      {
+        "id": "5.12.1",
+        "title": "Ensure 'root' user account is empty",
+        "description": "Root user account should be properly secured.",
+        "severity": "HIGH",
+        "check_command": "docker exec <container_id> id -u root",
+        "remediation": "Secure root user account in containers.",
+        "test_type": "container_exec"
+      },
+      {
+        "id": "5.13.1",
+        "title": "Ensure 'ENTRYPOINT' or 'CMD' is included in container images",
+        "description": "Container images should have ENTRYPOINT or CMD.",
+        "severity": "LOW",
+        "check_command": "docker inspect --format='{{.Config.Entrypoint}} {{.Config.Cmd}}' <image_id>",
+        "remediation": "Add ENTRYPOINT or CMD to Dockerfile.",
+        "test_type": "image_inspect"
+      },
+      {
+        "id": "5.14.1",
+        "title": "Ensure 'onbuild' instructions are not used in container images",
+        "description": "Avoid using ONBUILD instructions in container images.",
+        "severity": "LOW",
+        "check_command": "docker inspect --format='{{.Config.OnBuild}}' <image_id>",
+        "remediation": "Remove ONBUILD instructions from Dockerfile.",
+        "test_type": "image_inspect"
+      },
+      {
+        "id": "5.15.1",
+        "title": "Ensure 'verify' command is used during image build",
+        "description": "Verify image integrity during build process.",
+        "severity": "MEDIUM",
+        "check_command": "Check Dockerfile for verification steps",
+        "remediation": "Add verification steps to Dockerfile.",
+        "test_type": "dockerfile_check"
+      },
+      {
+        "id": "5.16.1",
+        "title": "Ensure 'WORKDIR' instruction is used in container images",
+        "description": "Use WORKDIR instruction to set working directory.",
+        "severity": "LOW",
+        "check_command": "docker inspect --format='{{.Config.WorkingDir}}' <image_id>",
+        "remediation": "Add WORKDIR instruction to Dockerfile.",
+        "test_type": "image_inspect"
+      },
+      {
+        "id": "5.17.1",
+        "title": "Ensure 'USER' instruction is used in container images",
+        "description": "Use USER instruction to set non-root user.",
+        "severity": "HIGH",
+        "check_command": "docker inspect --format='{{.Config.User}}' <image_id>",
+        "remediation": "Add USER instruction to Dockerfile.",
+        "test_type": "image_inspect"
+      },
+      {
+        "id": "5.18.1",
+        "title": "Ensure 'VERIFY' command is used during image build",
+        "description": "Verify image integrity during build.",
+        "severity": "MEDIUM",
+        "check_command": "Check Dockerfile for VERIFY steps",
+        "remediation": "Add verification steps to build process.",
+        "test_type": "dockerfile_check"
+      },
+      {
+        "id": "5.19.1",
+        "title": "Ensure 'ARG' instruction is used for secrets",
+        "description": "Use ARG instruction for secrets in Dockerfile.",
+        "severity": "MEDIUM",
+        "check_command": "docker inspect --format='{{.Config.Args}}' <image_id>",
+        "remediation": "Use ARG for secrets in Dockerfile.",
+        "test_type": "image_inspect"
+      },
+      {
+        "id": "5.20.1",
+        "title": "Ensure 'VOLUME' instruction is used for data persistence",
+        "description": "Use VOLUME instruction for data persistence.",
+        "severity": "LOW",
+        "check_command": "docker inspect --format='{{.Config.Volumes}}' <image_id>",
+        "remediation": "Add VOLUME instruction to Dockerfile.",
+        "test_type": "image_inspect"
+      }
+    ]
+  },
+  "Section 6": {
+    "title": "Container Runtime",
+    "controls": [
+      {
+        "id": "6.1.1",
+        "title": "Ensure container runtime is configured appropriately",
+        "description": "Container runtime should be properly configured.",
+        "severity": "MEDIUM",
+        "check_command": "docker info",
+        "remediation": "Configure container runtime settings.",
+        "test_type": "docker_info"
+      },
+      {
+        "id": "6.2.1",
+        "title": "Ensure container runtime socket is protected",
+        "description": "Container runtime socket should have proper permissions.",
+        "severity": "HIGH",
+        "check_command": "ls -l /var/run/docker.sock",
+        "remediation": "Set appropriate permissions on runtime socket.",
+        "test_type": "host_check"
+      }
+    ]
+  }
+}
