@@ -7,6 +7,7 @@ const API = "http://127.0.0.1:8000";
 export default function ConnectView() {
   const [selectedProvider, setSelectedProvider] = useState(null);
   const [isScanning, setIsScanning] = useState(false);
+  const [scanType, setScanType] = useState(null); // 'file' | 'provider' | null
   const [progress, setProgress] = useState(0);
   const [statusMessage, setStatusMessage] = useState("Initializing...");
   const [scanComplete, setScanComplete] = useState(false);
@@ -294,17 +295,29 @@ export default function ConnectView() {
 
   const handleUploadClick = () => fileInputRef.current.click();
 
-  const handleFileChange = (e) => {
-    if (e.target.files.length > 0) startScanning();
+  const handleFileChange = async (e) => {
+    const files = e.target.files;
+    if (files.length > 0) {
+      await uploadAndScan(files);
+    }
   };
 
-  const startScanning = async () => {
+  const uploadAndScan = async (files) => {
+    setScanType("file");
     setIsScanning(true);
     setProgress(0);
     setScanComplete(false);
+    setStatusMessage("Uploading files...");
+
+    // Create form data to upload files
+    const formData = new FormData();
+    for (const file of files) {
+      formData.append("files", file);
+    }
+
     const steps = [
-      { p: 10, m: "Parsing HCL files..." },
-      { p: 30, m: "Extracting resource definitions..." },
+      { p: 15, m: "Uploading files..." },
+      { p: 30, m: "Parsing HCL files..." },
       { p: 50, m: "Running Cisco Sec-8B Inference..." },
       { p: 70, m: "Analyzing against CIS Benchmarks..." },
       { p: 90, m: "Calculating compliance score..." },
@@ -313,26 +326,54 @@ export default function ConnectView() {
     let currentStep = 0;
     const interval = setInterval(() => {
       setProgress((prev) => {
-        if (prev >= 100) { clearInterval(interval); setScanComplete(true); return 100; }
+        if (prev >= 100) { clearInterval(interval); return 100; }
         const next = prev + 2;
         if (currentStep < steps.length && next >= steps[currentStep].p) { setStatusMessage(steps[currentStep].m); currentStep++; }
         return next;
       });
     }, 100);
+
     try {
-      await fetch(`${API}/api/scan`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ directory: "tests/fixtures" }) });
-    } catch {}
+      // Upload files and trigger scan
+      const res = await fetch(`${API}/api/scan/upload`, {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.detail || "Scan failed");
+      }
+
+      const data = await res.json();
+      setProgress(100);
+      setScanComplete(true);
+      setStatusMessage("Audit complete!");
+    } catch (err) {
+      console.error("Upload/scan error:", err);
+      setStatusMessage("Error: " + err.message);
+      setScanComplete(true);
+    } finally {
+      clearInterval(interval);
+    }
   };
 
   // ── Scanning View ──────────────────────────────────────────────────────
 
   if (isScanning) {
+    // Determine which icon to show: completed checkmark, provider icon, or file icon
+    const getScanIcon = () => {
+      if (scanComplete) return "circle-check";
+      if (scanType === "file") return "file-code";
+      return selectedProvider || "aws";
+    };
+
     return (
       <div className="animate-fade-in scanning-view">
         <div className="scanning-animation">
           <div className="scanning-ring"></div>
           <div className="scanning-icon">
-            <Icon name={scanComplete ? "circle-check" : (selectedProvider || "aws")} size={48} />
+            <Icon name={getScanIcon()} size={48} />
           </div>
         </div>
         <h2>{scanComplete ? "Scan Successful" : "Scanning Infrastructure..."}</h2>

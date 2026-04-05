@@ -42,7 +42,7 @@ _azure_scan_cache = None
 _gcp_scan_cache = None
 _container_scan_cache = {}
 
-from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect, BackgroundTasks
+from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect, BackgroundTasks, UploadFile, File
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -316,6 +316,52 @@ def trigger_scan(request: ScanRequest):
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/scan/upload", response_model=ScanResponse)
+async def upload_and_scan(files: List[UploadFile] = File(...)):
+    """Upload Terraform files and trigger a compliance audit."""
+    import shutil
+    import tempfile
+    
+    # Create a temporary directory to store uploaded files
+    temp_dir = tempfile.mkdtemp(prefix="terraform_upload_")
+    
+    try:
+        # Save uploaded files to temp directory
+        saved_files = []
+        for file in files:
+            if file.filename:
+                file_path = Path(temp_dir) / file.filename
+                with open(file_path, "wb") as f:
+                    content = await file.read()
+                    f.write(content)
+                saved_files.append(file.filename)
+        
+        if not saved_files:
+            raise HTTPException(status_code=400, detail="No valid files uploaded")
+        
+        # Run audit on the uploaded files
+        report = run_audit(
+            directory=temp_dir,
+            triggered_by="file_upload",
+        )
+        
+        return ScanResponse(
+            audit_id=report.audit_id,
+            compliance_score=report.compliance_score,
+            total_findings=report.total_findings,
+            severity_counts=report.severity_counts,
+            status=report.status,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        # Clean up temp directory
+        try:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+        except:
+            pass
 
 
 def _filter_findings_by_framework(findings_data: list, framework: str) -> list:
