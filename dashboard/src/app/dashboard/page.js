@@ -12,7 +12,7 @@ import MonitoringView from "@/components/MonitoringView";
 import TopologyView from "@/components/TopologyView";
 import { Icon } from "@/components/Icons";
 
-const API_BASE = "http://127.0.0.1:8000";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
 const CLOUD_LOGOS = { aws: "/logos/aws.svg", azure: "/logos/azure.svg", gcp: "/logos/gcp.svg" };
 
