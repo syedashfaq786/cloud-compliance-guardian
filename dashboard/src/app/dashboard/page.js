@@ -502,6 +502,7 @@ function DashboardOverview({ cloudStatuses, onNavigate }) {
 export default function DashboardPage() {
   const [activeTab, setActiveTab] = useState("dashboard");
   const [mountedTabs, setMountedTabs] = useState(new Set(["dashboard"]));
+  const [backendWaking, setBackendWaking] = useState(false);
 
   // Lift cloud status state so it persists across tab switches
   const [cloudStatuses, setCloudStatuses] = useState({
@@ -515,6 +516,16 @@ export default function DashboardPage() {
   useEffect(() => {
     let cancelled = false;
     const fetchStatuses = async () => {
+      // Ping health first — detect Render cold start (>3s = waking up)
+      const t0 = Date.now();
+      try {
+        await fetch(`${API_BASE}/api/health`, { signal: AbortSignal.timeout(4000) });
+      } catch {
+        setBackendWaking(true);
+        // Wait for backend to fully wake (Render free tier ~30s)
+        await new Promise(r => setTimeout(r, 20000));
+        setBackendWaking(false);
+      }
       try {
         const [awsRes, azureRes, gcpRes] = await Promise.all([
           fetch(`${API_BASE}/api/aws/status`).then(r => r.json()).catch(() => ({ connected: false })),
@@ -575,7 +586,13 @@ export default function DashboardPage() {
   return (
     <div className="app-layout">
       <Sidebar activeTab={activeTab} onTabChange={setActiveTab} />
-      <main className="main-content" style={fullBleedTabs.has(activeTab) ? { padding: 0 } : {}}>
+      {backendWaking && (
+        <div style={{ position: "fixed", top: 0, left: 0, right: 0, zIndex: 9999, background: "linear-gradient(90deg, #f97316, #ff9f43)", color: "#fff", textAlign: "center", padding: "10px 16px", fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center", gap: 10 }}>
+          <span style={{ width: 14, height: 14, border: "2px solid rgba(255,255,255,0.4)", borderTopColor: "#fff", borderRadius: "50%", display: "inline-block", animation: "spin 0.8s linear infinite" }} />
+          Backend is waking up (Render free tier) — this takes ~30 seconds on first visit…
+        </div>
+      )}
+      <main className="main-content" style={{ ...(fullBleedTabs.has(activeTab) ? { padding: 0 } : {}), ...(backendWaking ? { paddingTop: 44 } : {}) }}>
         {Object.entries(tabComponents).map(([key, component]) => (
           mountedTabs.has(key) && (
             <div
