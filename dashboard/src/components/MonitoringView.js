@@ -1,14 +1,15 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Icon } from "./Icons";
 
 const API = "http://127.0.0.1:8000";
 
 
-export default function MonitoringView({ onNavigate }) {
-  const [awsStatus, setAwsStatus] = useState(null);
-  const [azureStatus, setAzureStatus] = useState(null);
-  const [gcpStatus, setGcpStatus] = useState(null);
+export default function MonitoringView({ onNavigate, cloudStatuses, onCloudStatusChange }) {
+  // Use cloud statuses from parent — no redundant fetching
+  const awsStatus = cloudStatuses?.aws;
+  const azureStatus = cloudStatuses?.azure;
+  const gcpStatus = cloudStatuses?.gcp;
   const [selectedCloud, setSelectedCloud] = useState("aws");
   
   const [scanning, setScanning] = useState(false);
@@ -25,56 +26,48 @@ export default function MonitoringView({ onNavigate }) {
   const [downloading, setDownloading] = useState(null); // 'pdf' | 'csv' | 'json' | null
   const [scanFramework, setScanFramework] = useState("CIS"); // selected BEFORE scan runs
   const [searchQuery, setSearchQuery] = useState(""); // Search query for inventory filtering
+  const [cachedResultsLoaded, setCachedResultsLoaded] = useState(false);
+  const abortRef = useRef(null);
 
-
+  // Auto-select connected cloud on initial load
   useEffect(() => {
-    checkCloudStatuses();
-    loadCachedResults();
-  }, []);
-
-  useEffect(() => {
-    if (selectedCloud === "aws" && awsStatus?.connected) {
-      fetchRegions();
+    if (cloudStatuses?.loaded) {
+      if (!awsStatus?.connected) {
+        if (azureStatus?.connected) setSelectedCloud("azure");
+        else if (gcpStatus?.connected) setSelectedCloud("gcp");
+      }
     }
-    loadCachedResults();
-  }, [selectedCloud, awsStatus]);
+  }, [cloudStatuses?.loaded]);
+
+  // Load cached results only once per cloud switch
+  useEffect(() => {
+    if (cloudStatuses?.loaded) {
+      loadCachedResults();
+      if (selectedCloud === "aws" && awsStatus?.connected) fetchRegions();
+    }
+    // Cleanup in-flight requests on cloud switch
+    return () => {
+      if (abortRef.current) abortRef.current.abort();
+    };
+  }, [selectedCloud, cloudStatuses?.loaded]);
 
   const fetchRegions = async () => {
     try {
       const res = await fetch(`${API}/api/aws/regions`);
       const data = await res.json();
       setAvailableRegions(data.regions || []);
-      // Default to primary region only for fast scans
       if (data.primary) setSelectedRegions([data.primary]);
     } catch (err) {
       console.error("Failed to fetch AWS regions", err);
     }
   };
 
-  const checkCloudStatuses = async () => {
-    try {
-      const [awsRes, azureRes, gcpRes] = await Promise.all([
-        fetch(`${API}/api/aws/status`),
-        fetch(`${API}/api/azure/status`),
-        fetch(`${API}/api/gcp/status`)
-      ]);
-      const [awsData, azureData, gcpData] = await Promise.all([awsRes.json(), azureRes.json(), gcpRes.json()]);
-      setAwsStatus(awsData);
-      setAzureStatus(azureData);
-      setGcpStatus(gcpData);
-
-      if (!awsData.connected) {
-        if (azureData.connected) setSelectedCloud("azure");
-        else if (gcpData.connected) setSelectedCloud("gcp");
-      }
-    } catch (err) {
-      console.error("Failed to check cloud statuses", err);
-    }
-  };
-
   const loadCachedResults = async () => {
+    if (abortRef.current) abortRef.current.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
     try {
-      const res = await fetch(`${API}/api/${selectedCloud}/scan/latest`);
+      const res = await fetch(`${API}/api/${selectedCloud}/scan/latest`, { signal: controller.signal });
       const data = await res.json();
       if (data.cached) {
         setScanResults(data);
@@ -83,7 +76,13 @@ export default function MonitoringView({ onNavigate }) {
         setScanResults(null);
         setEvents([]);
       }
-    } catch {}
+      setCachedResultsLoaded(true);
+    } catch (err) {
+      if (err.name !== "AbortError") {
+        setScanResults(null);
+        setEvents([]);
+      }
+    }
   };
 
   const handleScan = async () => {
@@ -170,8 +169,8 @@ export default function MonitoringView({ onNavigate }) {
       await fetch(`${API}/api/${selectedCloud}/disconnect`, { method: "POST" });
       setScanResults(null);
       setEvents([]);
-      // Re-check statuses and navigate to Connect tab
-      await checkCloudStatuses();
+      // Re-check statuses via parent and navigate to Connect tab
+      if (onCloudStatusChange) await onCloudStatusChange();
       if (onNavigate) onNavigate("connect");
     } catch {}
   };
@@ -396,7 +395,7 @@ export default function MonitoringView({ onNavigate }) {
                 <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
                   Last scan: {scanResults?.scan_time ? new Date(scanResults.scan_time).toLocaleString() : "Available"}
                   <span style={{ marginLeft: 8, fontWeight: 700, color: fwColor }}>
-                    · {findings.length} controls · {findings.filter(f => f.status === "FAIL").length} findings
+                    · {findings.length} controls · {findings.filter(f => ["FAIL", "WARN"].includes(f.status?.toUpperCase())).length} issues
                   </span>
                 </div>
               </div>
@@ -511,10 +510,10 @@ export default function MonitoringView({ onNavigate }) {
               <div className="stat-value">{findings.length}</div>
               <div className="stat-label">Audited Controls</div>
             </div>
-            <div className="glass-card stat-card stat-amber" onClick={() => setActiveTab("compliance")} style={{ cursor: "pointer", transition: "transform 0.2s" }} onMouseEnter={(e) => e.currentTarget.style.transform = "scale(1.02)"} onMouseLeave={(e) => e.currentTarget.style.transform = "scale(1)"} title="Click to view findings">
+            <div className="glass-card stat-card stat-amber" onClick={() => setActiveTab("compliance")} style={{ cursor: "pointer", transition: "transform 0.2s" }} onMouseEnter={(e) => e.currentTarget.style.transform = "scale(1.02)"} onMouseLeave={(e) => e.currentTarget.style.transform = "scale(1)"} title="Click to view issues">
               <div className="stat-card-top"><div className="stat-icon"><Icon name="triangle-alert" size={24} /></div></div>
-              <div className="stat-value">{findings.filter(f => f.status === "FAIL").length}</div>
-              <div className="stat-label">Critical Findings</div>
+              <div className="stat-value">{findings.filter(f => ["FAIL", "WARN"].includes(f.status?.toUpperCase())).length}</div>
+              <div className="stat-label">Total Issues</div>
             </div>
           </div>
 
@@ -576,8 +575,14 @@ export default function MonitoringView({ onNavigate }) {
               </button>
             ))}
           </div>
-          {findings.filter(f => activeFilter === "all" || f.status === activeFilter.toUpperCase()).map((f, i) => (
-            <div key={i} className="glass-card" style={{ padding: 20, borderLeft: `4px solid ${f.status === "FAIL" ? getSeverityColor(f.severity) : "#22c55e"}` }}>
+          {findings.filter(f => {
+            const status = f.status?.toUpperCase();
+            if (activeFilter === "all") return true;
+            if (activeFilter === "fail") return ["FAIL", "WARN"].includes(status);
+            if (activeFilter === "pass") return status === "PASS";
+            return true;
+          }).map((f, i) => (
+            <div key={i} className="glass-card" style={{ padding: 20, borderLeft: `4px solid ${["FAIL", "WARN"].includes(f.status?.toUpperCase()) ? getSeverityColor(f.severity) : "#22c55e"}` }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
                 <div>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
@@ -590,7 +595,7 @@ export default function MonitoringView({ onNavigate }) {
                 <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-muted)" }}>{f.resource_name}</div>
               </div>
               <p style={{ fontSize: 14, color: "var(--text-secondary)", margin: 0, lineHeight: 1.5 }}>{f.description}</p>
-              {f.status === "FAIL" && f.remediation_step && (
+              {["FAIL", "WARN"].includes(f.status?.toUpperCase()) && f.remediation_step && (
                 <div style={{ marginTop: 16, background: "rgba(0,0,0,0.03)", padding: 12, borderRadius: 8, fontSize: 12, fontFamily: "monospace" }}>
                   <div style={{ marginBottom: 4, fontWeight: 700, color: "var(--text-muted)" }}>Remediation:</div>
                   {f.remediation_step}

@@ -592,6 +592,8 @@ export default function AuditsView() {
                     <td>
                        {(() => {
                          const src = getAuditSource(a);
+                         const cloudLogos = { aws: "/logos/aws.svg", azure: "/logos/azure.svg", gcp: "/logos/gcp.svg" };
+                         const logoSrc = cloudLogos[src.icon];
                          return (
                            <span style={{
                              display: "inline-flex", alignItems: "center", gap: 5,
@@ -599,7 +601,10 @@ export default function AuditsView() {
                              background: src.bg, color: src.color,
                              whiteSpace: "nowrap",
                            }}>
-                             {src.icon && <Icon name={src.icon} size={12} />}
+                             {logoSrc
+                               ? <img src={logoSrc} alt={src.icon} style={{ width: 14, height: 14, objectFit: "contain" }} />
+                               : src.icon && <Icon name={src.icon} size={12} />
+                             }
                              {src.label}
                            </span>
                          );

@@ -4,7 +4,7 @@ import { Icon } from "./Icons";
 
 const API = "http://127.0.0.1:8000";
 
-export default function ConnectView() {
+export default function ConnectView({ cloudStatuses, onCloudStatusChange }) {
   const [selectedProvider, setSelectedProvider] = useState(null);
   const [isScanning, setIsScanning] = useState(false);
   const [scanType, setScanType] = useState(null); // 'file' | 'provider' | 'container' | null
@@ -37,8 +37,12 @@ export default function ConnectView() {
   const [githubContainerFramework, setGithubContainerFramework] = useState("CIS");
   const [githubScanContainers, setGithubScanContainers] = useState(true);
 
-  // AWS state
-  const [awsStatus, setAwsStatus] = useState(null);
+  // Cloud statuses from parent (shared, no redundant fetching)
+  const awsStatus = cloudStatuses?.aws;
+  const azureStatus = cloudStatuses?.azure;
+  const gcpStatus = cloudStatuses?.gcp;
+
+  // AWS form state
   const [showAwsConfig, setShowAwsConfig] = useState(false);
   const [accessKey, setAccessKey] = useState("");
   const [secretKey, setSecretKey] = useState("");
@@ -47,8 +51,7 @@ export default function ConnectView() {
   const [awsError, setAwsError] = useState("");
   const [showSecret, setShowSecret] = useState(false);
 
-  // Azure state
-  const [azureStatus, setAzureStatus] = useState(null);
+  // Azure form state
   const [showAzureConfig, setShowAzureConfig] = useState(false);
   const [azureTenantId, setAzureTenantId] = useState("");
   const [azureClientId, setAzureClientId] = useState("");
@@ -57,8 +60,7 @@ export default function ConnectView() {
   const [azureConfiguring, setAzureConfiguring] = useState(false);
   const [azureError, setAzureError] = useState("");
 
-  // GCP state
-  const [gcpStatus, setGcpStatus] = useState(null);
+  // GCP form state
   const [showGcpConfig, setShowGcpConfig] = useState(false);
   const [gcpProjectId, setGcpProjectId] = useState("");
   const [gcpServiceAccountJson, setGcpServiceAccountJson] = useState("");
@@ -73,21 +75,13 @@ export default function ConnectView() {
 
   useEffect(() => {
     fetchConnectedRepo();
-    checkAwsStatus();
-    checkAzureStatus();
-    checkGcpStatus();
   }, []);
 
   // ── AWS Functions ──────────────────────────────────────────────────────
 
-  const checkAwsStatus = async () => {
-    try {
-      const res = await fetch(`${API}/api/aws/status`);
-      const data = await res.json();
-      setAwsStatus(data);
-    } catch {
-      setAwsStatus({ connected: false });
-    }
+  // Refresh all cloud statuses via parent
+  const refreshStatuses = async () => {
+    if (onCloudStatusChange) await onCloudStatusChange();
   };
 
   const handleAwsConfigure = async () => {
@@ -111,7 +105,7 @@ export default function ConnectView() {
       
       const data = await res.json();
       if (data.status === "connected") {
-        setAwsStatus({ connected: true, ...data });
+        await refreshStatuses();
         setShowAwsConfig(false);
         setAccessKey("");
         setSecretKey("");
@@ -135,19 +129,13 @@ export default function ConnectView() {
   const handleAwsDisconnect = async () => {
     try {
       await fetch(`${API}/api/aws/disconnect`, { method: "POST" });
-      setAwsStatus({ connected: false });
+      await refreshStatuses();
     } catch {}
   };
 
   // ── Azure Functions ───────────────────────────────────────────────────
 
-  const checkAzureStatus = async () => {
-    try {
-      const res = await fetch(`${API}/api/azure/status`);
-      const data = await res.json();
-      setAzureStatus(data);
-    } catch { setAzureStatus({ connected: false }); }
-  };
+
 
   const handleAzureConfigure = async () => {
     if (!azureTenantId.trim() || !azureClientId.trim() || !azureClientSecret.trim() || !azureSubscriptionId.trim()) {
@@ -175,7 +163,7 @@ export default function ConnectView() {
       
       const data = await res.json();
       if (data.status === "connected") {
-        setAzureStatus({ connected: true, ...data });
+        await refreshStatuses();
         setShowAzureConfig(false);
         setAzureError("✓ Connected! Starting background discovery...");
         setTimeout(() => setAzureError(""), 4000);
@@ -193,19 +181,13 @@ export default function ConnectView() {
   const handleAzureDisconnect = async () => {
     try {
       await fetch(`${API}/api/azure/disconnect`, { method: "POST" });
-      setAzureStatus({ connected: false });
+      await refreshStatuses();
     } catch {}
   };
 
   // ── GCP Functions ─────────────────────────────────────────────────────
 
-  const checkGcpStatus = async () => {
-    try {
-      const res = await fetch(`${API}/api/gcp/status`);
-      const data = await res.json();
-      setGcpStatus(data);
-    } catch { setGcpStatus({ connected: false }); }
-  };
+
 
   const handleGcpConfigure = async () => {
     if (!gcpProjectId.trim() || !gcpServiceAccountJson.trim()) {
@@ -231,7 +213,7 @@ export default function ConnectView() {
       
       const data = await res.json();
       if (data.status === "connected") {
-        setGcpStatus({ connected: true, ...data });
+        await refreshStatuses();
         setShowGcpConfig(false);
         setGcpError("✓ Connected! Starting background discovery...");
         setTimeout(() => setGcpError(""), 4000);
@@ -249,7 +231,7 @@ export default function ConnectView() {
   const handleGcpDisconnect = async () => {
     try {
       await fetch(`${API}/api/gcp/disconnect`, { method: "POST" });
-      setGcpStatus({ connected: false });
+      await refreshStatuses();
     } catch {}
   };
 

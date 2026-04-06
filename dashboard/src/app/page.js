@@ -87,13 +87,13 @@ export default function LoginPage() {
         </div>
 
           {/* Logo + name */}
-          <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 36 }}>
-            <div style={{ width: 48, height: 48, borderRadius: 14, background: "rgba(255,159,67,0.12)", border: "1px solid rgba(255,159,67,0.25)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-              <Logo size={30} />
+          <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 36 }}>
+            <div style={{ width: 62, height: 62, borderRadius: 18, background: "rgba(255,159,67,0.12)", border: "1px solid rgba(255,159,67,0.25)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, boxShadow: "0 0 24px rgba(255,159,67,0.15)" }}>
+              <Logo size={38} />
             </div>
             <div>
-              <div style={{ fontSize: 15, fontWeight: 800, color: "#fff", lineHeight: 1.2, letterSpacing: "-0.01em" }}>Invecto</div>
-              <div style={{ fontSize: 12, fontWeight: 600, color: "rgba(255,159,67,0.85)", letterSpacing: "0.04em", textTransform: "uppercase" }}>Compliance Guard</div>
+              <div style={{ fontSize: 26, fontWeight: 900, color: "#fff", lineHeight: 1.15, letterSpacing: "-0.03em" }}>Invecto</div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: "rgba(255,159,67,0.9)", letterSpacing: "0.06em", textTransform: "uppercase", lineHeight: 1.3 }}>Compliance Guard</div>
             </div>
           </div>
 

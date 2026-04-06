@@ -29,16 +29,16 @@ export default function Sidebar({ activeTab = "dashboard", onTabChange }) {
   return (
     <aside className="sidebar">
       <div className="sidebar-logo">
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <div style={{ width: 42, height: 42, borderRadius: 12, background: "rgba(255,159,67,0.14)", border: "1px solid rgba(255,159,67,0.28)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, boxShadow: "0 0 16px rgba(255,159,67,0.12)" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ width: 44, height: 44, borderRadius: 12, background: "rgba(255,159,67,0.14)", border: "1px solid rgba(255,159,67,0.28)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, boxShadow: "0 0 16px rgba(255,159,67,0.15)" }}>
             <Logo size={26} />
           </div>
-          <div>
-            <div style={{ fontSize: 17, fontWeight: 900, color: "#fff", lineHeight: 1.15, letterSpacing: "-0.4px" }}>Invecto</div>
-            <div style={{ fontSize: 12, fontWeight: 700, color: "rgba(255,159,67,0.9)", letterSpacing: "0.06em", textTransform: "uppercase", lineHeight: 1.3 }}>Compliance Guard</div>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 18, fontWeight: 900, color: "#fff", lineHeight: 1.2, letterSpacing: "-0.4px" }}>Invecto</div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,159,67,0.9)", letterSpacing: "0.04em", textTransform: "uppercase", lineHeight: 1.3, whiteSpace: "nowrap" }}>Compliance Guard</div>
           </div>
         </div>
-        <span style={{ marginTop: 10, display: "block" }}>AI-Powered Cloud Security</span>
+        <span style={{ marginTop: 8, display: "block", fontSize: 10, color: "rgba(255,255,255,0.35)", letterSpacing: "0.03em", fontWeight: 500 }}>AI-Powered Cloud &amp; Container Security</span>
       </div>
 
       <nav className="sidebar-nav">

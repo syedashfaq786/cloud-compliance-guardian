@@ -16,6 +16,7 @@ from .cis_rules import get_rules_for_resource_type, Severity
 from .remediation import enrich_remediation
 from .database import init_db, get_session, save_audit, save_drift_alert, get_recent_audits
 from .rule_engine import run_rule_based_audit, get_audit_summary, detect_cloud_provider
+from .scoring import calculate_compliance_score, get_severity_summary
 
 
 @dataclass
@@ -58,37 +59,17 @@ class AuditReport:
         }
 
 
-def _calculate_compliance_score(findings: List[ViolationFinding], total_resources: int) -> float:
-    """Calculate a compliance score (0-100) based on findings."""
-    if total_resources == 0:
-        return 100.0
-
-    severity_weights = {
-        "CRITICAL": 10.0,
-        "HIGH": 5.0,
-        "MEDIUM": 2.0,
-        "LOW": 1.0,
-        "INFO": 0.0,
-    }
-
-    total_penalty = sum(
-        severity_weights.get(f.severity, 1.0) for f in findings
-        if f.rule_id != "ERROR"
-    )
-
-    max_penalty = total_resources * 10.0  # worst case: all critical
-    score = max(0.0, 100.0 - (total_penalty / max_penalty * 100.0))
-    return round(score, 1)
+def _calculate_compliance_score(findings: List[ViolationFinding], total_checks: int) -> float:
+    """Calculate compliance score using the shared scoring utility."""
+    # Convert findings to dicts for the utility
+    finding_dicts = [f.to_dict() if hasattr(f, "to_dict") else f.__dict__ for f in findings]
+    return calculate_compliance_score(finding_dicts, total_checks)
 
 
 def _count_severities(findings: List[ViolationFinding]) -> Dict[str, int]:
-    """Count findings by severity level."""
-    counts = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0, "INFO": 0}
-    for f in findings:
-        sev = f.severity.upper()
-        if sev in counts:
-            counts[sev] += 1
-    return counts
+    """Count findings by severity level using the shared scoring utility."""
+    finding_dicts = [f.to_dict() if hasattr(f, "to_dict") else f.__dict__ for f in findings]
+    return get_severity_summary(finding_dicts)
 
 
 def _detect_drift(current_findings: List[ViolationFinding], audit_id: str):

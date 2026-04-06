@@ -63,6 +63,7 @@ from .database import (
     get_connected_repo,
     update_repo_sync_time,
     save_audit,
+    upsert_cloud_scan_audit,
 )
 from .audit import run_audit
 from .github import clone_repo, get_repo_metadata, sync_and_scan, get_repo_name_from_url
@@ -85,6 +86,8 @@ try:
     from .ccm_auditor import audit_aws_resources_ccm
 except ImportError:
     audit_aws_resources_ccm = None
+
+from .scoring import calculate_compliance_score, get_issue_count, get_severity_summary
 
 
 # ─── WebSocket Broadcast Manager ──────────────────────────────────────────────
@@ -209,7 +212,43 @@ def health_check():
 
 @app.get("/api/summary")
 def get_summary():
-    """Get overall compliance summary."""
+    """
+    Get overall compliance summary.
+    Prefers live scan caches (same source as Monitoring/Topology) so all tabs
+    show the same numbers. Falls back to DB aggregate when no scan has run yet.
+    """
+    # ── Try live caches first (AWS → Azure → GCP → Container) ────────────────
+    for cache in (_aws_scan_cache, _azure_scan_cache, _gcp_scan_cache, _container_scan_cache):
+        if not cache:
+            continue
+        audit = cache.get("audit") or {}
+        findings = audit.get("findings") or []
+        scan = cache.get("scan") or {}
+
+        total_resources = scan.get("total_resources") or len(cache.get("resources") or [])
+        fail_findings = [f for f in findings if str(f.get("status", "")).upper() in ("FAIL", "WARN")]
+        sev = {"critical": 0, "high": 0, "medium": 0, "low": 0}
+        for f in fail_findings:
+            s = str(f.get("severity") or "low").lower()
+            if s in sev:
+                sev[s] += 1
+
+        # Get total audit count from DB for the counter card
+        db_session = get_session()
+        try:
+            db_summary = get_compliance_summary(db_session)
+        finally:
+            db_session.close()
+
+        return {
+            "compliance_score": round(audit.get("health_score") or 0, 1),
+            "total_audits": db_summary.get("total_audits", 0),
+            "total_findings": len(fail_findings),
+            "resources_scanned": total_resources,
+            "severity_breakdown": sev,
+        }
+
+    # ── Fallback: DB aggregate ────────────────────────────────────────────────
     session = get_session()
     try:
         return get_compliance_summary(session)
@@ -906,9 +945,9 @@ def download_audit_report(
 
         if format == "json":
             fw_total = len(findings_data)
-            fw_passed = sum(1 for f in findings_data if f.get("status") == "PASS")
-            fw_failed = fw_total - fw_passed
-            fw_score = round((fw_passed / fw_total) * 100, 1) if fw_total > 0 else 0.0
+            fw_failed = get_issue_count(findings_data)
+            fw_passed = fw_total - fw_failed
+            fw_score = calculate_compliance_score(findings_data, fw_total)
             report = {
                 "report_title": f"Invecto Compliance Guard — Audit Report{fw_label}",
                 "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -1245,21 +1284,12 @@ def _persist_cloud_scan(
         resources = result.get("resources") or []
         scan_summary = result.get("scan") or {}
 
-        failed_findings = [
-            f for f in findings
-            if str(f.get("status", "")).upper() in {"FAIL", "WARN"}
-        ]
-
-        sev_counts = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0}
-        for finding in failed_findings:
-            sev = str(finding.get("severity", "LOW")).upper()
-            if sev in sev_counts:
-                sev_counts[sev] += 1
+        failed_findings = [f for f in findings if str(f.get("status", "")).upper() in {"FAIL", "WARN"}]
+        sev_counts = get_severity_summary(findings)
 
         mapped_findings = []
         for finding in findings:
-            raw_status = str(finding.get("status", "FAIL")).upper()
-            db_status = "PASS" if raw_status == "PASS" else "FAIL"
+            db_status = str(finding.get("status", "FAIL")).upper()
             mapped_findings.append({
                 "rule_id": finding.get("rule_id") or finding.get("cis_rule_id") or "",
                 "rule_title": finding.get("rule_title") or finding.get("title") or "Cloud Security Control",
@@ -1291,7 +1321,7 @@ def _persist_cloud_scan(
         audit_id = str(uuid.uuid4())[:12]
         init_db()
         session = get_session()
-        save_audit(session, {
+        upsert_cloud_scan_audit(session, {
             "audit_id": audit_id,
             "directory": f"{provider_upper} Live Scan",
             "files_scanned": 0,
@@ -1301,7 +1331,7 @@ def _persist_cloud_scan(
             "high_count": sev_counts["HIGH"],
             "medium_count": sev_counts["MEDIUM"],
             "low_count": sev_counts["LOW"],
-            "compliance_score": float(health_score),
+            "compliance_score": float(calculate_compliance_score(findings, len(resources))),
             "status": "completed",
             "triggered_by": "cloud_monitoring",
             "metadata_json": {
@@ -1339,21 +1369,12 @@ def _persist_container_audit(
         resources = result.get("resources") or []
         summary = (result.get("audit") or {}).get("summary") or {}
 
-        failed_findings = [
-            f for f in findings
-            if str(f.get("status", "")).upper() in {"FAIL", "WARN"}
-        ]
-
-        sev_counts = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0}
-        for finding in failed_findings:
-            sev = str(finding.get("severity", "LOW")).upper()
-            if sev in sev_counts:
-                sev_counts[sev] += 1
+        failed_findings = [f for f in findings if str(f.get("status", "")).upper() in {"FAIL", "WARN"}]
+        sev_counts = get_severity_summary(findings)
 
         mapped_findings = []
         for finding in findings:
-            raw_status = str(finding.get("status", "FAIL")).upper()
-            db_status = "PASS" if raw_status == "PASS" else "FAIL"
+            db_status = str(finding.get("status", "FAIL")).upper()
             mapped_findings.append({
                 "rule_id": finding.get("rule_id") or finding.get("cis_rule_id") or "",
                 "rule_title": finding.get("rule_title") or finding.get("title") or "Container Security Control",
@@ -1385,7 +1406,7 @@ def _persist_container_audit(
             "high_count": sev_counts["HIGH"],
             "medium_count": sev_counts["MEDIUM"],
             "low_count": sev_counts["LOW"],
-            "compliance_score": float((result.get("audit") or {}).get("health_score", summary.get("health_score", 0.0)) or 0.0),
+            "compliance_score": float(calculate_compliance_score(findings, len(resources))),
             "status": "completed",
             "triggered_by": triggered_by,
             "metadata_json": {
@@ -2187,8 +2208,10 @@ def get_topology():
         account_id   = scan_meta.get("account_id", "")
         primary_reg  = scan_meta.get("primary_region") or (regions_list[0] if regions_list else "us-east-1")
 
-        # compliance posture
-        score = round((compliant / total) * 100) if total > 0 else 0
+        # Use health_score directly from the scan cache — same value Monitoring shows.
+        # Do NOT recalculate with resource count as denominator (gives wrong result).
+        score = round((_aws_scan_cache.get("audit") or {}).get("health_score") or
+                      calculate_compliance_score(findings, len(findings)), 1)
         if score >= 80:
             posture = "COMPLIANT"
         elif score >= 60:
@@ -2215,6 +2238,12 @@ def get_topology():
         }
 
         # ── 2. REGIONS — per-region resource breakdown ────────────────────────
+        # Build per-region findings for consistent weighted scoring
+        findings_by_region = {}
+        for f in findings:
+            reg = f.get("resource_region") or "global"
+            findings_by_region.setdefault(reg, []).append(f)
+
         region_map = {}
         for r in resources:
             if "error" in r:
@@ -2329,6 +2358,12 @@ def get_topology():
                     region_map[reg] = {"name": reg, "resources": [], "vpcs": [],
                                        "total": 0, "violations": 0, "cloudtrail": False}
                 region_map[reg]["resources"].append(make_node(r))
+
+        # Add weighted compliance score to each region (consistent with Monitoring view)
+        for reg_data in region_map.values():
+            reg_name = reg_data["name"]
+            reg_findings = findings_by_region.get(reg_name, [])
+            reg_data["score"] = round(calculate_compliance_score(reg_findings, reg_data["total"]), 1)
 
         regions_out = sorted(region_map.values(), key=lambda x: x["name"])
 

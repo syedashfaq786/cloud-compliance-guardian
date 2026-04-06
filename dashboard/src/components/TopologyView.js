@@ -335,7 +335,7 @@ function buildRegionGraph(region) {
     data: {
       label: region.name, nodeType: "region", active: true,
       subtitle: `${region.total} resources · ${region.vpcs?.length || 0} VPCs`,
-      count: region.total, violations: region.violations,
+      count: region.total, violations: region.violations, score: region.score,
       badges: [region.cloudtrail
         ? { text: "✓ CloudTrail", bg: "#052e16", color: "#22c55e" }
         : { text: "✗ CloudTrail", bg: "#2d0a0a", color: "#ef4444" }],
@@ -837,7 +837,7 @@ export default function TopologyView() {
   }, [topoData]);
 
   return (
-    <div style={{ width: "100%", height: "100%", display: "flex", flexDirection: "column", background: "#030a14", overflow: "hidden" }}>
+    <div style={{ width: "100%", height: "100vh", display: "flex", flexDirection: "column", background: "#030a14", overflow: "hidden" }}>
 
       {/* ── Header ── */}
       <div style={{ padding: "9px 14px", background: "#050d1a", borderBottom: "1px solid #131f33", display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>

@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 
 from .parser import TerraformResource
 from .cis_rules import CISRule, get_rules_for_resource_type, Severity
+from .scoring import calculate_compliance_score, get_issue_count, get_severity_summary
 
 
 # ─── Cloud Provider Detection ──────────────────────────────────────────────────
@@ -795,13 +796,19 @@ def get_audit_summary(findings: List[RuleFinding]) -> Dict[str, Any]:
         if f.status == "FAIL" and f.severity in severity_counts:
             severity_counts[f.severity] += 1
 
-    # Compliance score: percentage of checks that passed
-    score = (passed / total * 100) if total > 0 else 100.0
-
+    # Compliance score: weighted penalty system
+    severity_weights = {"CRITICAL": 15.0, "HIGH": 8.0, "MEDIUM": 3.0, "LOW": 1.0}
+    total_penalty = sum(
+        severity_weights.get(f.severity.upper(), 1.0) for f in findings
+        if f.status == "FAIL"
+    )
+    max_penalty = total * 15.0
+    score = max(0.0, 100.0 - (total_penalty / max_penalty * 100.0)) if max_penalty > 0 else 100.0
+    
     return {
-        "total_checks": total,
+        "total": total,
         "passed": passed,
         "failed": failed,
-        "compliance_score": round(score, 1),
         "severity_counts": severity_counts,
+        "compliance_score": round(score, 1),
     }

@@ -271,6 +271,66 @@ def save_audit(session: Session, audit_data: Dict[str, Any]) -> Audit:
     return audit
 
 
+def upsert_cloud_scan_audit(session: Session, audit_data: Dict[str, Any]) -> Audit:
+    """
+    Upsert a cloud monitoring scan audit.
+    If an audit already exists for the same provider+framework, update it in-place
+    (preserving the audit_id). Otherwise insert a new record.
+    This prevents unbounded duplicate rows every time a scan runs.
+    """
+    meta = audit_data.get("metadata_json", {}) or {}
+
+    # Find the most recent existing record for this provider+framework
+    existing = (
+        session.query(Audit)
+        .filter(
+            Audit.triggered_by == "cloud_monitoring",
+            Audit.directory == audit_data.get("directory", ""),
+        )
+        .order_by(Audit.created_at.desc())
+        .first()
+    )
+
+    if existing:
+        # Update fields in-place
+        existing.resources_scanned = audit_data.get("resources_scanned", 0)
+        existing.total_findings = audit_data.get("total_findings", 0)
+        existing.critical_count = audit_data.get("critical_count", 0)
+        existing.high_count = audit_data.get("high_count", 0)
+        existing.medium_count = audit_data.get("medium_count", 0)
+        existing.low_count = audit_data.get("low_count", 0)
+        existing.compliance_score = audit_data.get("compliance_score", 100.0)
+        existing.metadata_json = meta
+        existing.created_at = datetime.now(timezone.utc)
+
+        # Replace findings: delete old, insert new
+        session.query(Finding).filter(Finding.audit_id == existing.id).delete()
+        session.flush()
+        for finding_data in audit_data.get("findings", []):
+            session.add(Finding(
+                audit_id=existing.id,
+                rule_id=finding_data.get("rule_id", ""),
+                rule_title=finding_data.get("rule_title", ""),
+                severity=finding_data.get("severity", "MEDIUM"),
+                resource_address=finding_data.get("resource_address", ""),
+                resource_type=finding_data.get("resource_type", ""),
+                file_path=finding_data.get("file_path", ""),
+                description=finding_data.get("description", ""),
+                remediation_hcl=finding_data.get("remediation_hcl", ""),
+                reasoning=finding_data.get("reasoning", ""),
+                expected=finding_data.get("expected", ""),
+                actual=finding_data.get("actual", ""),
+                recommendation=finding_data.get("recommendation", ""),
+                cloud_provider=finding_data.get("cloud_provider", "AWS"),
+                check_status=finding_data.get("status", "FAIL"),
+                confidence=finding_data.get("confidence", 0.0),
+            ))
+        session.commit()
+        return existing
+    else:
+        return save_audit(session, audit_data)
+
+
 def get_recent_audits(session: Session, limit: int = 20) -> List[Audit]:
     """Get the most recent audits."""
     return (

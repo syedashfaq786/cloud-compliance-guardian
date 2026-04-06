@@ -16,6 +16,8 @@ from reportlab.platypus import (
 )
 from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT
 
+from .scoring import calculate_compliance_score, get_issue_count
+
 
 # ─── Color Palette ───────────────────────────────────────────────────────────
 
@@ -97,11 +99,8 @@ def _framework_meta(framework: str) -> dict:
 
 
 def _compute_score(findings: list) -> float:
-    """Compute compliance score from a findings list (passed / total * 100)."""
-    if not findings:
-        return 0.0
-    passed = sum(1 for f in findings if f.get("status") == "PASS")
-    return round((passed / len(findings)) * 100, 1)
+    """Compute compliance score using the shared scoring utility."""
+    return calculate_compliance_score(findings, len(findings))
 
 
 def _get_styles():
@@ -299,8 +298,8 @@ def generate_pdf_report(audit_data: Dict[str, Any], findings_data: List[Dict[str
     story.append(Paragraph("1. Executive Summary", styles["SectionHeader"]))
 
     # Always compute score from the (already-filtered) findings_data
-    failed = [f for f in findings_data if f.get("status") == "FAIL"]
-    passed = [f for f in findings_data if f.get("status") == "PASS"]
+    failed = [f for f in findings_data if str(f.get("status", "")).upper() in {"FAIL", "WARN"}]
+    passed = [f for f in findings_data if str(f.get("status", "")).upper() == "PASS"]
     total_checks = len(findings_data)
     score = _compute_score(findings_data) if total_checks > 0 else float(audit_data.get("compliance_score", 0))
     grade = _score_grade(score)
@@ -610,11 +609,11 @@ def generate_aws_pdf_report(scan_cache: Dict[str, Any]) -> bytes:
     findings = audit.get("findings", [])
     # Always compute score from the filtered findings passed in
     total_checks = len(findings)
-    passed = sum(1 for f in findings if f.get("status") == "PASS")
-    failed_count = sum(1 for f in findings if f.get("status") == "FAIL")
-    failed = [f for f in findings if f.get("status") == "FAIL"]
-    passed_findings = [f for f in findings if f.get("status") == "PASS"]
-    health = _compute_score(findings) if total_checks > 0 else float(audit.get("health_score", 0))
+    passed_findings = [f for f in findings if str(f.get("status", "")).upper() == "PASS"]
+    failed = [f for f in findings if str(f.get("status", "")).upper() in ("FAIL", "WARN", "NON_COMPLIANT")]
+    failed_count = get_issue_count(findings)
+    passed = total_checks - failed_count
+    health = calculate_compliance_score(findings, total_checks)
 
     # ═════════════════════════════════════════════════════════════════════
     # TITLE
