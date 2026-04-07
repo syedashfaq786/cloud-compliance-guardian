@@ -116,7 +116,7 @@ manager = ConnectionManager()
 # ─── App Setup ────────────────────────────────────────────────────────────────
 
 app = FastAPI(
-    title="Invecto Compliance Guard API",
+    title="Invecto Compliance Manager API",
     description="CIS Benchmark compliance auditor powered by Cisco Sec-8B",
     version="1.0.0",
 )
@@ -251,7 +251,11 @@ def get_summary():
     # ── Fallback: DB aggregate ────────────────────────────────────────────────
     session = get_session()
     try:
-        return get_compliance_summary(session)
+        db = get_compliance_summary(session)
+        # If DB has data, return it directly
+        if db.get("total_audits", 0) > 0:
+            return db
+        return db
     finally:
         session.close()
 
@@ -949,7 +953,7 @@ def download_audit_report(
             fw_passed = fw_total - fw_failed
             fw_score = calculate_compliance_score(findings_data, fw_total)
             report = {
-                "report_title": f"Invecto Compliance Guard — Audit Report{fw_label}",
+                "report_title": f"Invecto Compliance Manager — Audit Report{fw_label}",
                 "generated_at": datetime.now(timezone.utc).isoformat(),
                 "framework_filter": framework,
                 "audit": audit_data,
@@ -2034,7 +2038,7 @@ def download_container_report(
         failed = total - passed
         score = round((passed / total) * 100, 1) if total > 0 else 0.0
         report = {
-            "report_title": f"Invecto Compliance Guard — Container Security Audit{fw_label}",
+            "report_title": f"Invecto Compliance Manager — Container Security Audit{fw_label}",
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "framework_filter": framework,
             "scan_summary": scan_meta,
@@ -2496,7 +2500,7 @@ def download_aws_report(
 
     if format == "json":
         report = {
-            "report_title": f"Invecto Compliance Guard — AWS Live Audit Report{fw_label}",
+            "report_title": f"Invecto Compliance Manager — AWS Live Audit Report{fw_label}",
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "framework_filter": framework,
             "region": region,

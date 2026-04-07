@@ -93,7 +93,7 @@ export default function LoginPage() {
             </div>
             <div>
               <div style={{ fontSize: 26, fontWeight: 900, color: "#fff", lineHeight: 1.15, letterSpacing: "-0.03em" }}>Invecto</div>
-              <div style={{ fontSize: 14, fontWeight: 700, color: "rgba(255,159,67,0.9)", letterSpacing: "0.06em", textTransform: "uppercase", lineHeight: 1.3 }}>Compliance Guard</div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: "rgba(255,159,67,0.9)", letterSpacing: "0.06em", textTransform: "uppercase", lineHeight: 1.3 }}>Compliance Manager</div>
             </div>
           </div>
 

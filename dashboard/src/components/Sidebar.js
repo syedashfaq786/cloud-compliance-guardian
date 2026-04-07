@@ -35,7 +35,7 @@ export default function Sidebar({ activeTab = "dashboard", onTabChange }) {
           </div>
           <div style={{ minWidth: 0 }}>
             <div style={{ fontSize: 18, fontWeight: 900, color: "#fff", lineHeight: 1.2, letterSpacing: "-0.4px" }}>Invecto</div>
-            <div style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,159,67,0.9)", letterSpacing: "0.04em", textTransform: "uppercase", lineHeight: 1.3, whiteSpace: "nowrap" }}>Compliance Guard</div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,159,67,0.9)", letterSpacing: "0.04em", textTransform: "uppercase", lineHeight: 1.3, whiteSpace: "nowrap" }}>Compliance Manager</div>
           </div>
         </div>
         <span style={{ marginTop: 8, display: "block", fontSize: 10, color: "rgba(255,255,255,0.35)", letterSpacing: "0.03em", fontWeight: 500 }}>AI-Powered Cloud &amp; Container Security</span>
